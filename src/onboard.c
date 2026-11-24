@@ -228,76 +228,232 @@ int rslap_profile_encode(const struct rslap_profile *p, uint8_t *out, size_t out
     return (int)len;
 }
 
+/* --------------------------------------------------------- 0x8100 ops */
+
 int rslap_ob_init(struct rslap_onboard *ob, struct hidpp_device *dev)
 {
-    (void)ob; (void)dev;
-    return RSLAP_RC_UNSUPPORTED;
+    uint8_t out[HIDPP_MAX_PARAMS];
+    int rc;
+
+    memset(ob, 0, sizeof(*ob));
+    ob->dev = dev;
+    rc = hidpp_request(dev, FEAT_ONBOARD, 0, NULL, 0, out);
+    if (rc != RSLAP_RC_OK)
+        return rc;
+    ob->info.memory_model = out[0];
+    ob->info.fmt = out[1];
+    ob->info.macro_fmt = out[2];
+    ob->info.profile_count = out[3];
+    ob->info.profile_count_oob = out[4];
+    ob->info.button_count = out[5];
+    ob->info.sector_count = out[6];
+    ob->info.sector_size = (out[7] << 8) | out[8];
+    ob->info.gshift = (out[9] & 0x03) == 0x02;
+
+    if (ob->info.memory_model != 1)
+        return RSLAP_RC_REFUSED; /* unsupported onboard memory model */
+    if (ob->info.sector_size < 2 || ob->info.sector_size > RSLAP_MAX_SECTOR)
+        return RSLAP_RC_MALFORMED;
+    if (ob->info.button_count < 1 || ob->info.button_count > RSLAP_MAX_BUTTONS)
+        return RSLAP_RC_MALFORMED;
+    return RSLAP_RC_OK;
 }
 
-int rslap_ob_read_sector(const struct rslap_onboard *ob, int sector, uint8_t *out, size_t outlen)
+int rslap_ob_read_sector(const struct rslap_onboard *ob, int sector,
+                         uint8_t *out, size_t outlen)
 {
-    (void)ob; (void)sector; (void)out; (void)outlen;
-    return RSLAP_RC_MALFORMED;
+    int size = ob->info.sector_size;
+    int off = 0;
+
+    if (sector < 0 || outlen < (size_t)size)
+        return RSLAP_RC_REFUSED;
+
+    while (off < size - 15) {
+        uint8_t params[4] = {(uint8_t)(sector >> 8), (uint8_t)sector,
+                             (uint8_t)(off >> 8), (uint8_t)off};
+        uint8_t outp[HIDPP_MAX_PARAMS];
+        int rc = hidpp_request(ob->dev, FEAT_ONBOARD, OB_FN_READ, params, 4, outp);
+
+        if (rc != RSLAP_RC_OK)
+            return rc;
+        memcpy(out + off, outp, 16);
+        off += 16;
+    }
+    if (off < size) {
+        /* last partial chunk: read 16 bytes ending exactly at sector end */
+        uint8_t params[4] = {(uint8_t)(sector >> 8), (uint8_t)sector,
+                             (uint8_t)((size - 16) >> 8), (uint8_t)(size - 16)};
+        uint8_t outp[HIDPP_MAX_PARAMS];
+        int rc = hidpp_request(ob->dev, FEAT_ONBOARD, OB_FN_READ, params, 4, outp);
+        int tail = size - off;
+
+        if (rc != RSLAP_RC_OK)
+            return rc;
+        memcpy(out + off, outp + (16 - tail), (size_t)tail);
+    }
+    return RSLAP_RC_OK;
 }
 
-int rslap_ob_write_sector(const struct rslap_onboard *ob, int sector, const uint8_t *data, size_t len)
+int rslap_ob_write_sector(const struct rslap_onboard *ob, int sector,
+                          const uint8_t *data, size_t len)
 {
-    (void)ob; (void)sector; (void)data; (void)len;
-    return RSLAP_RC_MALFORMED;
+    int size = ob->info.sector_size;
+    uint8_t back[RSLAP_MAX_SECTOR];
+    int rc;
+
+    if (sector < 0 || sector >= RSLAP_ROM_BASE || sector >= ob->info.sector_count)
+        return RSLAP_RC_REFUSED; /* read-only / out of range */
+    if (len != (size_t)size)
+        return RSLAP_RC_REFUSED;
+    if (!rslap_crc_ok(data, len))
+        return RSLAP_RC_REFUSED; /* never write a sector with a bad CRC */
+
+    {
+        uint8_t params[6] = {(uint8_t)(sector >> 8), (uint8_t)sector,
+                             0, 0, (uint8_t)(size >> 8), (uint8_t)size};
+
+        rc = hidpp_request(ob->dev, FEAT_ONBOARD, OB_FN_WRITE_START, params, 6, NULL);
+        if (rc != RSLAP_RC_OK)
+            return rc;
+    }
+    for (int off = 0; off < size; off += 16) {
+        uint8_t chunk[16];
+
+        memcpy(chunk, data + off, 16);
+        rc = hidpp_request(ob->dev, FEAT_ONBOARD, OB_FN_WRITE_DATA, chunk, 16, NULL);
+        if (rc != RSLAP_RC_OK)
+            return rc;
+    }
+    rc = hidpp_request(ob->dev, FEAT_ONBOARD, OB_FN_WRITE_END, NULL, 0, NULL);
+    if (rc != RSLAP_RC_OK)
+        return rc;
+
+    /* read back and verify: never leave a mismatched sector behind */
+    rc = rslap_ob_read_sector(ob, sector, back, sizeof(back));
+    if (rc != RSLAP_RC_OK)
+        return rc;
+    if (memcmp(back, data, len) != 0)
+        return RSLAP_RC_MALFORMED;
+    return RSLAP_RC_OK;
 }
 
 int rslap_ob_get_mode(const struct rslap_onboard *ob)
 {
-    (void)ob;
-    return RSLAP_RC_MALFORMED;
+    uint8_t out[HIDPP_MAX_PARAMS];
+    int rc = hidpp_request(ob->dev, FEAT_ONBOARD, OB_FN_GET_MODE, NULL, 0, out);
+
+    return rc == RSLAP_RC_OK ? out[0] : rc;
 }
 
 int rslap_ob_set_mode(const struct rslap_onboard *ob, int mode)
 {
-    (void)ob; (void)mode;
-    return RSLAP_RC_MALFORMED;
+    uint8_t params[1] = {(uint8_t)mode};
+
+    return hidpp_request(ob->dev, FEAT_ONBOARD, OB_FN_SET_MODE, params, 1, NULL);
 }
 
 int rslap_ob_get_current_sector(const struct rslap_onboard *ob)
 {
-    (void)ob;
-    return RSLAP_RC_MALFORMED;
+    uint8_t out[HIDPP_MAX_PARAMS];
+    int rc = hidpp_request(ob->dev, FEAT_ONBOARD, OB_FN_GET_SECTOR, NULL, 0, out);
+
+    return rc == RSLAP_RC_OK ? (out[0] << 8) | out[1] : rc;
 }
 
 int rslap_ob_set_current_sector(const struct rslap_onboard *ob, int sector)
 {
-    (void)ob; (void)sector;
-    return RSLAP_RC_MALFORMED;
+    uint8_t params[2] = {(uint8_t)(sector >> 8), (uint8_t)sector};
+
+    return hidpp_request(ob->dev, FEAT_ONBOARD, OB_FN_SET_SECTOR, params, 2, NULL);
 }
 
 int rslap_ob_read_directory(const struct rslap_onboard *ob, int rom,
                             struct rslap_dir_entry *out, int max)
 {
-    (void)ob; (void)rom; (void)out; (void)max;
-    return RSLAP_RC_MALFORMED;
+    uint8_t raw[RSLAP_MAX_SECTOR];
+    int rc, n = 0;
+
+    rc = rslap_ob_read_sector(ob, rom ? RSLAP_ROM_BASE : 0, raw, sizeof(raw));
+    if (rc != RSLAP_RC_OK)
+        return 0; /* e.g. never-written flash: report no entries */
+    for (int off = 0; off + 3 < ob->info.sector_size && n < max; off += 4) {
+        int sec = rslap_be16(raw + off);
+
+        if (sec == 0xFFFF || sec == 0x0000)
+            break;
+        out[n].sector = sec;
+        out[n].enabled = raw[off + 2] == 1;
+        n++;
+    }
+    return n;
 }
 
 int rslap_ob_write_directory(const struct rslap_onboard *ob,
-                             const struct rslap_dir_entry *entries, int n)
+                            const struct rslap_dir_entry *entries, int n)
 {
-    (void)ob; (void)entries; (void)n;
-    return RSLAP_RC_MALFORMED;
+    uint8_t raw[RSLAP_MAX_SECTOR];
+    int size = ob->info.sector_size;
+
+    if (size > RSLAP_MAX_SECTOR || n * 4 + 2 > size)
+        return RSLAP_RC_REFUSED;
+    memset(raw, 0xFF, (size_t)size);
+    for (int i = 0; i < n; i++) {
+        raw[4 * i] = (uint8_t)(entries[i].sector >> 8);
+        raw[4 * i + 1] = (uint8_t)entries[i].sector;
+        raw[4 * i + 2] = (uint8_t)(entries[i].enabled ? 1 : 0);
+    }
+    rslap_with_crc(raw, (size_t)size);
+    return rslap_ob_write_sector(ob, 0, raw, (size_t)size);
 }
 
 int rslap_ob_rom_sectors(const struct rslap_onboard *ob, int *out, int max)
 {
-    (void)ob; (void)out; (void)max;
-    return RSLAP_RC_MALFORMED;
+    struct rslap_dir_entry entries[8];
+    int n = rslap_ob_read_directory(ob, 1, entries, 8);
+
+    if (n <= 0) {
+        if (max < 1)
+            return 0;
+        out[0] = RSLAP_ROM_BASE + 1; /* documented fallback */
+        return 1;
+    }
+    if (n > max)
+        n = max;
+    for (int i = 0; i < n; i++)
+        out[i] = entries[i].sector;
+    return n;
 }
 
 int rslap_ob_activate(struct rslap_onboard *ob, int sector)
 {
-    (void)ob; (void)sector;
-    return RSLAP_RC_MALFORMED;
+    int cur = rslap_ob_get_current_sector(ob);
+    struct rslap_dir_entry entries[8];
+    int rom_secs[8];
+    int nrom, ndir;
+
+    if (cur < 0 && cur != sector)
+        return cur; /* transport error other than "already there" */
+
+    if (cur == sector) {
+        /* re-selecting may not re-apply; hop to another profile first */
+        nrom = rslap_ob_rom_sectors(ob, rom_secs, 8);
+        for (int i = 0; i < nrom; i++) {
+            if (rom_secs[i] != sector)
+                rslap_ob_set_current_sector(ob, rom_secs[i]); /* best effort */
+        }
+        ndir = rslap_ob_read_directory(ob, 0, entries, 8);
+        for (int i = 0; i < ndir; i++) {
+            if (entries[i].enabled && entries[i].sector != sector)
+                rslap_ob_set_current_sector(ob, entries[i].sector); /* best effort */
+        }
+    }
+    return rslap_ob_set_current_sector(ob, sector);
 }
 
 int rslap_ob_get_dpi_index(const struct rslap_onboard *ob)
 {
-    (void)ob;
-    return RSLAP_RC_MALFORMED;
+    uint8_t out[HIDPP_MAX_PARAMS];
+    int rc = hidpp_request(ob->dev, FEAT_ONBOARD, OB_FN_GET_DPI_IDX, NULL, 0, out);
+
+    return rc == RSLAP_RC_OK ? out[0] : rc;
 }

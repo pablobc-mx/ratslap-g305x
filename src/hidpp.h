@@ -59,8 +59,9 @@ const char *hidpp_strerror(int code);
  * devnum 0xFF (replies may carry the receiver slot instead, so strict = 0);
  * a receiver node itself serves slots 1..6 and must match strictly. */
 struct hidpp_candidate {
-    char path[80];   /* e.g. /dev/hidraw0 (prefix overridable for tests) */
+    char path[256];   /* e.g. /dev/hidraw0 (prefix overridable for tests) */
     char name[128];  /* HID_NAME, plus " slot N" for receiver slots */
+    char link[24];   /* "USB", "wireless", "Bluetooth", "receiver" */
     int bus;         /* 3 = USB, 5 = Bluetooth */
     uint16_t vid, pid;
     int devnum;

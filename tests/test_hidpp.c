@@ -84,6 +84,7 @@ int main(void)
         kind = hidpp_classify(reply, sizeof(reply), &devnum, &idx, &fnsw, params);
         CHECK(kind == HIDPP_REPLY_ERR1);
         CHECK(devnum == 0x02);
+        CHECK(idx == 0x00 && fnsw == 0x1B);
         CHECK(params[0] == 0x01);
     }
     /* junk: not for us */

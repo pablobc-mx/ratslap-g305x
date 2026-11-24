@@ -38,7 +38,12 @@ enum rslap_rc {
     RSLAP_RC_UNSUPPORTED = -5, /* device lacks the needed feature */
 };
 
+/* Print "ratslap-g305x: <msg>" to stderr and exit with `code`. */
+#if defined(__GNUC__)
+void die(int code, const char *fmt, ...) __attribute__((noreturn));
+#else
 void die(int code, const char *fmt, ...);
+#endif
 
 static inline uint16_t rslap_le16(const uint8_t *p)
 {

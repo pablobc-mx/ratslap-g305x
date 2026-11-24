@@ -29,8 +29,12 @@ tests/golden.h: tests/gen_golden.py
 tests/test_%: tests/test_%.c $(LIB_SRC) src/util.h src/hidpp.h src/onboard.h src/actions.h tests/golden.h
 	$(CC) $(ALL_CFLAGS) -Isrc -Itests -o $@ tests/test_$*.c $(LIB_SRC)
 
-test: all $(TEST_BINS)
-	@set -e; for t in $(TEST_BINS); do echo "== $$t"; ./$$t; done
+test: all $(MOCK_SO) $(TEST_BINS)
+	@set -e; for t in $(TEST_BINS); do echo "== $$t"; ./$$t; done; \
+	echo "== integration"; bash tests/integration.sh
+
+tests/mock_hidraw.so: tests/mock_hidraw.c tests/golden.h
+	$(CC) -std=gnu99 -Wall -Wextra -Werror -shared -fPIC -Itests -o $@ tests/mock_hidraw.c -ldl
 
 clean:
 	rm -f $(OBJ) $(BIN) $(MOCK_SO) $(TEST_BINS)
