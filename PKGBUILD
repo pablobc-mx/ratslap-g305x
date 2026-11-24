@@ -8,7 +8,7 @@
 # reintroduce nested source directories.
 
 pkgname=ratslap-g305x
-pkgver=0.1.4
+pkgver=0.1.5
 pkgrel=1
 pkgdesc="Configure the Logitech G305 X on Linux: buttons, DPI, report rate, profiles (HID++, no daemon)"
 arch=('x86_64')
@@ -23,10 +23,10 @@ source=("Makefile" "util.h" "hidpp.h" "hidpp.c" "onboard.h" "onboard.c" \
         "42-g305x.rules" "README.md" "LICENSE")
 sha256sums=('9af6c0df7b74eade12afb4a97a14e813845f9330b54daca5293acf2488d7b4bf'
             '137bb80993d42431d70c4303bc34bd067adea2aee5b06bd22f8341a9c20c3a16'
-            '9cb363d98c8905bea0cfc10bf7971a072be103d4965b964241d8eb65cf816c82'
-            '94cab2c591e46185846126b9aafc4d1d040dd368209485711d8c42a54ee8fd42'
+            '520872a4711ec8de3e0b10696de0d19eb8aa02ca257650d3372e34dc997a921b'
+            '5edda5369f07157b1d06c4cce1ca705d3f2acac5419a819c149f3f9384f75191'
             '45f2acc96fc4b520d51c514a124548f8412db10d09d96445efcdfa90f44b9e86'
-            '0ce14129aeb79754ca6178a3ed61f2d2b1b1fa02199f06c1b3b906a65ae4c4f2'
+            'fb7f58444e99885d5be3e1b2cc850f2a81fd4c6c2f333711b45187be33acc2c8'
             '062ee159bfe85502866a2afb390d3b028a48e206369e3cc86694a8cd037546b6'
             '8f845d771e4c74ccabb5a8f188c8afe36cf2c99dff6abfed06d5a9b7cc159fe0'
             'ff4e1413fe773037d689e5dfe739cacba5684aa58f1a1f916a3c8dc48ca9b32a'
@@ -34,10 +34,10 @@ sha256sums=('9af6c0df7b74eade12afb4a97a14e813845f9330b54daca5293acf2488d7b4bf'
             '087d2521d171a48ef00553914ba50dee5e29095c8d4b57111572a4ec973e35e4'
             '22c90a4d2829dbeaad46902508a2d4e9419ea4ac10dc725b78dff58e762555a7'
             '088609144ced62fb4e4e196ca4747c2ea6505c6fa13c2a8ec536d7c91b3cc871'
-            'a4fea28d50018effa876f72bc41d53f572fd6b889ac2b5534f1a562436ff9a64'
+            'bf7d9b09a438e1c215db6af994b8d7c0fb9478ac713a0ef893ad11beeaa227b2'
             '354559853b32e2c0b3d473d7f82302a898102c611ef8bd39a6c8c364f302030c'
             'a242112632dd0687af0981b7e722e294232df839b79454baef5904ff087ff281'
-            'f0fc396bd4965087a97608f41fe20b282b6f739970bac2d1c9144e2832c6466a'
+            '7882d58b7075c44e6ee251849f836080ede04b1cb5263957b78145d36bf19b15'
             '754aae16a664eb929dabad5514e9fe1a4d28602ccd98a652ba913be8db228f46'
             '504f90b50832d8f85ce54c1af1567cb3e7af6b8f4c23690181c96a846fa6ce36'
             '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986')

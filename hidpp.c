@@ -436,11 +436,13 @@ int hidpp_request(struct hidpp_device *d, int feat_slot, uint8_t fn,
 }
 
 /* Send fn as a SHORT-report request (report ID 0x10, no software-id
- * nibble, no params). EndWrite (0x8100 fn 8) is only defined on the
- * short report: G HUB and libratbag send it that way, and the G305 X
- * firmware rejects the long form with INVALID_ARGUMENT
+ * nibble, up to 3 params). SetCurrentProfile, SetOnboardMode and
+ * EndWrite are only defined on the short report: G HUB and libratbag
+ * send them that way, and the G305 X firmware rejects the long form
+ * of SetCurrentProfile and EndWrite with INVALID_ARGUMENT
  * (owner-confirmed on real hardware). */
-int hidpp_request_short(struct hidpp_device *d, int feat_slot, uint8_t fn)
+int hidpp_request_short(struct hidpp_device *d, int feat_slot, uint8_t fn,
+                        const uint8_t *params, size_t n)
 {
     uint8_t req[HIDPP_LONG_LEN];
     uint8_t rep[64];
@@ -450,6 +452,8 @@ int hidpp_request_short(struct hidpp_device *d, int feat_slot, uint8_t fn)
     long deadline;
     int rc, len;
 
+    if (n > 3)
+        return RSLAP_RC_MALFORMED;
     rc = hidpp_feature_index(d, feat_slot, slot_features[feat_slot]);
     if (rc != RSLAP_RC_OK) {
         d->err.feature = slot_features[feat_slot];
@@ -463,6 +467,12 @@ int hidpp_request_short(struct hidpp_device *d, int feat_slot, uint8_t fn)
     req[1] = d->devnum;
     req[2] = idx;
     req[3] = fnsw;
+    if (n > 0)
+        req[4] = params[0];
+    if (n > 1)
+        req[5] = params[1];
+    if (n > 2)
+        req[6] = params[2];
 
     /* drain stale input reports first */
     for (;;) {

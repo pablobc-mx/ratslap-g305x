@@ -301,7 +301,11 @@ int rslap_ob_write_sector(const struct rslap_onboard *ob, int sector,
     uint8_t back[RSLAP_MAX_SECTOR];
     int rc;
 
-    if (sector < 0 || sector >= RSLAP_ROM_BASE || sector >= ob->info.sector_count)
+    /* Bound by profile_count, not sector_count: the G305 X reports a
+     * sector_count of 1 in its memory description while happily writing
+     * the directory and every slot 1..profile_count (owner-confirmed on
+     * real hardware). Sectors above profile_count are ROM / unwritable. */
+    if (sector < 0 || sector > ob->info.profile_count)
         return RSLAP_RC_REFUSED; /* read-only / out of range */
     if (len != (size_t)size)
         return RSLAP_RC_REFUSED;
@@ -324,7 +328,7 @@ int rslap_ob_write_sector(const struct rslap_onboard *ob, int sector,
         if (rc != RSLAP_RC_OK)
             return rc;
     }
-    rc = hidpp_request_short(ob->dev, FEAT_ONBOARD, OB_FN_WRITE_END);
+    rc = hidpp_request_short(ob->dev, FEAT_ONBOARD, OB_FN_WRITE_END, NULL, 0);
     if (rc != RSLAP_RC_OK)
         return rc;
 
@@ -349,7 +353,7 @@ int rslap_ob_set_mode(const struct rslap_onboard *ob, int mode)
 {
     uint8_t params[1] = {(uint8_t)mode};
 
-    return hidpp_request(ob->dev, FEAT_ONBOARD, OB_FN_SET_MODE, params, 1, NULL);
+    return hidpp_request_short(ob->dev, FEAT_ONBOARD, OB_FN_SET_MODE, params, 1);
 }
 
 int rslap_ob_get_current_sector(const struct rslap_onboard *ob)
@@ -360,11 +364,14 @@ int rslap_ob_get_current_sector(const struct rslap_onboard *ob)
     return rc == RSLAP_RC_OK ? (out[0] << 8) | out[1] : rc;
 }
 
+/* Canonical short form (libratbag parity): the profile index rides in
+ * parameters[1]. The G305 X firmware rejects the long form with
+ * INVALID_ARGUMENT. */
 int rslap_ob_set_current_sector(const struct rslap_onboard *ob, int sector)
 {
-    uint8_t params[2] = {(uint8_t)(sector >> 8), (uint8_t)sector};
+    uint8_t params[3] = {0x00, (uint8_t)sector, 0x00};
 
-    return hidpp_request(ob->dev, FEAT_ONBOARD, OB_FN_SET_SECTOR, params, 2, NULL);
+    return hidpp_request_short(ob->dev, FEAT_ONBOARD, OB_FN_SET_SECTOR, params, 3);
 }
 
 int rslap_ob_read_directory(const struct rslap_onboard *ob, int rom,
@@ -445,7 +452,21 @@ int rslap_ob_activate(struct rslap_onboard *ob, int sector)
     for (i = 0; i < ndir; i++)
         if (entries[i].sector == sector)
             break;
-    if (i == ndir) { /* not listed: append */
+    if (ndir == 0) {
+        /* Factory-fresh blank directory: reconstruct the configured-device
+         * shape, the same thing libratbag's write_dict builds — every
+         * slot listed in order, all enabled. */
+        int nslots = ob->info.profile_count;
+
+        if (nslots > (int)(sizeof(entries) / sizeof(entries[0])))
+            nslots = (int)(sizeof(entries) / sizeof(entries[0]));
+        for (i = 0; i < nslots; i++) {
+            entries[i].sector = i + 1;
+            entries[i].enabled = 1;
+        }
+        ndir = nslots;
+        need_write = 1;
+    } else if (i == ndir) { /* partial directory: merge the target in */
         if (ndir >= (int)(sizeof(entries) / sizeof(entries[0])))
             return RSLAP_RC_REFUSED;
         entries[ndir].sector = sector;

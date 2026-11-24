@@ -360,11 +360,12 @@ static void handle_frame(const uint8_t *req, size_t len, uint8_t *reply)
     p = req + 4;
 
     if (req[0] == 0x10) {
-        /* short-report requests: the tool only sends EndWrite this way
-         * (canonical form — G HUB and libratbag do the same) */
-        if (idx == 6 && fn == 8)
+        /* short-report requests: SetMode (fn 1), SetCurrentProfile (fn 3)
+         * and EndWrite (fn 8) are defined on this form — G HUB and
+         * libratbag send them that way. */
+        if (idx == 6 && (fn == 1 || fn == 3 || fn == 8))
             onboard_fn(reply, devnum, idx, fnsw, p);
-        return; /* any other short request: not part of this slice */
+        return;
     }
     if (req[0] != 0x11)
         return; /* not a long frame: ignore */
@@ -504,10 +505,12 @@ static void handle_frame(const uint8_t *req, size_t len, uint8_t *reply)
         return;
     }
     case 6: /* 0x8100 on-board profiles */
-        if (fn == 8) {
-            /* EndWrite is defined on the SHORT report only. Real firmware
-             * (owner-confirmed on a G305 X) rejects the long form with
-             * INVALID_ARGUMENT — mirror that so the regression sticks. */
+        if (fn == 8 || fn == 3) {
+            /* EndWrite and SetCurrentProfile are defined on the SHORT
+             * report only. Real firmware (owner-confirmed on a G305 X)
+             * rejects the long form with INVALID_ARGUMENT — mirror that
+             * so the regression sticks. Long fn 1/2/4/5/6/7 keep being
+             * accepted: that leniency was observed on real hardware. */
             reply_err2(reply, devnum, idx, fnsw, 2);
             return;
         }

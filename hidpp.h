@@ -128,10 +128,12 @@ int hidpp_request(struct hidpp_device *d, int feat_slot, uint8_t fn,
                   const uint8_t *params, size_t n,
                   uint8_t out[HIDPP_MAX_PARAMS]);
 
-/* Short-report (ID 0x10) request with no params: EndWrite (0x8100 fn 8)
- * is only defined on that form; the G305 X firmware rejects the long
- * form with INVALID_ARGUMENT. */
-int hidpp_request_short(struct hidpp_device *d, int feat_slot, uint8_t fn);
+/* Short-report (ID 0x10) request, up to 3 params: SetCurrentProfile,
+ * SetOnboardMode and EndWrite are only defined on that form; the G305 X
+ * firmware rejects the long form of the first and last with
+ * INVALID_ARGUMENT. */
+int hidpp_request_short(struct hidpp_device *d, int feat_slot, uint8_t fn,
+                       const uint8_t *params, size_t n);
 
 /* ---------------------------------------------------- feature conveniences */
 
