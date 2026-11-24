@@ -124,14 +124,16 @@ Currently known for this family:
 | `046d:c547` | LIGHTSPEED USB receiver | owner-confirmed (this unit) |
 | `046d:40bb` | G305 X LIGHTSPEED wireless wpid | owner-confirmed (this unit) |
 | `046d:40bc` | G304 X wireless wpid (Asian-market sibling) | from libratbag PR #1911 |
-| `046d:c0a7` | G304 X / G305 X wired USB-C | expected, unconfirmed |
+| `046d:c0a4` | G305 X SUPERLIGHT wired USB-C | owner-confirmed (this unit) |
+| `046d:c0a7` | G304 X wired USB-C | expected, unconfirmed |
 | `046d:b046` | G305 X SUPERLIGHT (Bluetooth sibling) | from OpenGMice |
 | `046d:4074` | G305 LIGHTSPEED (original, format 3) | long-known |
 
 Verified end-to-end in hardware (2026-11): a G305 X SUPERLIGHT on
-firmware `MPM 39.00.0012`, connected through the `046d:c547` receiver —
-`list`, `info` (format-7 decode, battery, live DPI / report rate),
-`backup` and the modify-safety gate all behave exactly as the mock
+firmware `MPM 39.00.0012` — wireless through the `046d:c547` receiver
+(wpid `046d:40bb`) and wired over USB-C (`046d:c0a4`) — where `list`,
+`info` (format-7 decode, battery, live DPI / report rate), `backup`
+and the modify-safety gate all behave exactly as the mock
 integration test predicts.
 
 Discovery is **runtime**: the tool scans `/dev/hidraw*`, pings HID++ 2.0,
