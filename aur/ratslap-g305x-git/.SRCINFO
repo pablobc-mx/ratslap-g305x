@@ -1,6 +1,6 @@
 pkgbase = ratslap-g305x-git
 	pkgdesc = Configure the Logitech G305 X on Linux: buttons, DPI, report rate, profiles (HID++, no daemon)
-	pkgver = 0.1.0
+	pkgver = 0.1.1
 	pkgrel = 1
 	url = https://github.com/pablobc-mx/ratslap-g305x
 	arch = x86_64
@@ -9,9 +9,9 @@ pkgbase = ratslap-g305x-git
 	makedepends = gcc
 	makedepends = make
 	depends = glibc
-	provides = ratslap-g305x=0.1.0
+	provides = ratslap-g305x=0.1.1
 	conflicts = ratslap-g305x
-	source = git+https://github.com/pablobc-mx/ratslap-g305x.git#tag=v0.1.0
+	source = git+https://github.com/pablobc-mx/ratslap-g305x.git#tag=v0.1.1
 	sha256sums = SKIP
 
 pkgname = ratslap-g305x-git

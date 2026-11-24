@@ -1,5 +1,11 @@
 *.o
 ratslap-g305x
-tests/*.so
-tests/test_*
-!tests/test_*.c
+test_crc
+test_hidpp
+test_profile
+test_actions
+mock_hidraw.so
+core
+/src/
+/pkg/
+*.pkg.tar.*

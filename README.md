@@ -57,26 +57,35 @@ use `profilenext` / `profileprev` / `profilecycle` on a button, or the
 git clone https://github.com/pablobc-mx/ratslap-g305x && cd ratslap-g305x && makepkg -si
 ```
 
-Then install the udev rule (once per machine) and replug the mouse or its
-receiver:
+`makepkg -si` builds the binary, runs the full test suite (`check()`)
+— CRC vectors, HID++ framing, a format-7 golden sector round trip, and
+a mock-device integration test; no mouse needs to be attached — and
+installs the binary **and** the udev rule
+(`/usr/lib/udev/rules.d/42-g305x.rules`).
+
+Afterwards replug the mouse or its receiver once, or reload udev rules
+without replugging:
 
 ```bash
-sudo install -Dm644 42-g305x.rules /usr/lib/udev/rules.d/42-g305x.rules
 sudo udevadm control --reload && sudo udevadm trigger
 ```
 
-`makepkg -si` also runs the full test suite (`check()`) — CRC vectors,
-HID++ framing, a format-7 golden sector round trip, and a mock-device
-integration test. No mouse needs to be attached.
+The repo layout is deliberately flat (krayon/ratslap style): makepkg
+stages local sources into `./src` by file name, and directories are not
+valid `source=()` entries — nested source directories would break
+`makepkg -si` run from the clone, so don't reintroduce them.
 
 ### Install (generic Linux)
 
 ```bash
-make && sudo make install     # or: cc -O2 -o ratslap-g305x src/*.c
+make && sudo make install     # or: cc -O2 -o ratslap-g305x *.c
+sudo install -Dm644 42-g305x.rules /usr/lib/udev/rules.d/42-g305x.rules
+sudo udevadm control --reload && sudo udevadm trigger
 ```
 
-`make` needs only gcc + make; `make test` additionally uses bash and
-python3 to regenerate the golden test vectors if missing.
+`make` needs only gcc + make; `make test` additionally uses bash, and
+python3 only when `golden.h` is missing (`rm golden.h` to force a
+regeneration).
 
 ## First run on the mouse (do this once, in order)
 
@@ -189,14 +198,15 @@ mouse *emits*, which is exactly what games and apps will see.)
 
 `make test` runs everything headless — no mouse attached:
 
-- `tests/test_crc.c` — CRC-CCITT vectors (canonical `0x29B1` check value
-  plus golden sectors computed by an independent Python implementation)
-- `tests/test_hidpp.c` — HID++ frame build/parse round trips, error
+- `test_crc.c` — CRC-CCITT vectors (canonical `0x29B1` check value
+  plus golden sectors computed by an independent Python implementation,
+  `gen_golden.py`; the generated `golden.h` is committed)
+- `test_hidpp.c` — HID++ frame build/parse round trips, error
   classification
-- `tests/test_profile.c` — full format-7 (and format-3) sector
+- `test_profile.c` — full format-7 (and format-3) sector
   decode/encode round trip against golden sectors, field-edit isolation
-- `tests/test_actions.c` — every binding token parse + describe
-- `tests/integration.sh` + `tests/mock_hidraw.c` — the real binary,
+- `test_actions.c` — every binding token parse + describe
+- `integration.sh` + `mock_hidraw.c` — the real binary,
   `LD_PRELOAD`ed against a fake G305 X (`046d:40bb`), exercising scan,
   probe, info, the safety gate, backup/restore, every write path, the
   ROM reset, and the host-mode DPI quirk

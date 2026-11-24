@@ -3,7 +3,7 @@
  * Interposes open/open64/read/write/select/close/ioctl. Any open() under
  * $RSLAP_DEV_PREFIX is hijacked: the node named by $MOCK_MOUSE_NODE
  * (default hidraw0) becomes a minimal HID++ 2.0 G305 X (profile format 7,
- * golden sectors from tests/golden.h, wpid 046d:40bb — the owner-confirmed
+ * golden sectors from golden.h, wpid 046d:40bb — the owner-confirmed
  * value); every other node behaves like a receiver slot with nothing
  * paired (HID++ 1.0 error replies).
  *
@@ -11,7 +11,7 @@
  * select() reports readability exactly when a reply is pending, so the
  * program under test exercises its real request/reply loop.
  *
- * Build: cc -std=gnu99 -shared -fPIC -o tests/mock_hidraw.so tests/mock_hidraw.c -ldl
+ * Build: cc -std=gnu99 -shared -fPIC -o mock_hidraw.so mock_hidraw.c -ldl
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>

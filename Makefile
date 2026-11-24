@@ -2,6 +2,11 @@
 #
 # `make`       build the CLI binary
 # `make test`  unit tests + mock-hidraw integration test (no mouse needed)
+#
+# The layout is deliberately flat (krayon/ratslap style): makepkg stages
+# local sources into ./src by file name only, so nested directories would
+# collide with makepkg's own work directories. Do not reintroduce src/.
+
 CC       ?= cc
 CFLAGS   ?= -O2
 WARN      = -std=c99 -Wall -Wextra -Werror
@@ -9,34 +14,46 @@ DEFS      = -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE
 ALL_CFLAGS = $(WARN) $(DEFS) $(CFLAGS)
 
 BIN      = ratslap-g305x
-LIB_SRC  = src/hidpp.c src/onboard.c src/actions.c
-OBJ      = $(LIB_SRC:.c=.o) src/main.o
+HDRS     = util.h hidpp.h onboard.h actions.h
+LIB_SRC  = hidpp.c onboard.c actions.c
+OBJ      = $(LIB_SRC:.c=.o) main.o
 
-TEST_BINS = tests/test_crc tests/test_hidpp tests/test_profile tests/test_actions
-MOCK_SO   = tests/mock_hidraw.so
+TEST_BINS = test_crc test_hidpp test_profile test_actions
+MOCK_SO   = mock_hidraw.so
 
 all: $(BIN)
 
 $(BIN): $(OBJ)
 	$(CC) $(ALL_CFLAGS) -o $@ $(OBJ)
 
-%.o: %.c src/util.h src/hidpp.h src/onboard.h src/actions.h
+%.o: %.c $(HDRS)
 	$(CC) $(ALL_CFLAGS) -c -o $@ $<
 
-tests/golden.h: tests/gen_golden.py
-	python3 tests/gen_golden.py > $@
+# golden.h is committed. Regenerate only when it is missing
+# (`rm golden.h && make`) so `make test` never needs python3 in a
+# clean build environment.
+golden.h: gen_golden.py
+	@test -f $@ || python3 gen_golden.py > $@
 
-tests/test_%: tests/test_%.c $(LIB_SRC) src/util.h src/hidpp.h src/onboard.h src/actions.h tests/golden.h
-	$(CC) $(ALL_CFLAGS) -Isrc -Itests -o $@ tests/test_$*.c $(LIB_SRC)
+test_%: test_%.c $(LIB_SRC) $(HDRS) golden.h
+	$(CC) $(ALL_CFLAGS) -o $@ test_$*.c $(LIB_SRC)
 
 test: all $(MOCK_SO) $(TEST_BINS)
 	@set -e; for t in $(TEST_BINS); do echo "== $$t"; ./$$t; done; \
-	echo "== integration"; bash tests/integration.sh
+	echo "== integration"; bash integration.sh
 
-tests/mock_hidraw.so: tests/mock_hidraw.c tests/golden.h
-	$(CC) -std=gnu99 -Wall -Wextra -Werror -shared -fPIC -Itests -o $@ tests/mock_hidraw.c -ldl
+mock_hidraw.so: mock_hidraw.c golden.h
+	$(CC) -std=gnu99 -Wall -Wextra -Werror -shared -fPIC -o $@ mock_hidraw.c -ldl
 
 clean:
 	rm -f $(OBJ) $(BIN) $(MOCK_SO) $(TEST_BINS)
 
-.PHONY: all test clean
+PREFIX ?= /usr/local
+
+install: $(BIN)
+	install -Dm755 $(BIN) $(DESTDIR)$(PREFIX)/bin/$(BIN)
+	install -Dm644 42-g305x.rules $(DESTDIR)/usr/lib/udev/rules.d/42-g305x.rules
+	install -Dm644 README.md $(DESTDIR)$(PREFIX)/share/doc/ratslap-g305x/README.md
+	install -Dm644 LICENSE $(DESTDIR)$(PREFIX)/share/licenses/ratslap-g305x/LICENSE
+
+.PHONY: all test clean install

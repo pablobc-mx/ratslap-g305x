@@ -19,11 +19,11 @@ cd "$(dirname "$0")"
 
 # sanity: clean tree, tag present
 [ -z "$(git status --porcelain)" ] || { echo "git tree is dirty; commit first" >&2; exit 1; }
-git rev-parse -q --verify 'refs/tags/v0.1.0' >/dev/null || {
-    echo "tag v0.1.0 not found; run: git tag v0.1.0" >&2
+tag="$(git describe --tags --abbrev=0 2>/dev/null)" || {
+    echo "no tag found; run: git tag vX.Y.Z" >&2
     exit 1
 }
 
 git push "$remote" main
-git push "$remote" v0.1.0
-echo "published main + v0.1.0 to $remote"
+git push "$remote" "$tag"
+echo "published main + $tag to $remote"
