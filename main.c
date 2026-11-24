@@ -122,7 +122,7 @@ static int rc_exit(const struct app *a, int rc, const char *what)
         die(EX_DEVICE, "%s: no reply from the device (timeout)", what);
     case RSLAP_RC_HIDPP:
         die(EX_DEVICE, "%s: HID++ error 0x%02X (%s) from feature 0x%04X fn %d",
-            what, a->dev.err.code, hidpp_errname(a->dev.err.code),
+            what, a->dev.err.code, hidpp_strerror(a->dev.err.code),
             a->dev.err.feature, a->dev.err.fn);
     case RSLAP_RC_MALFORMED:
         die(EX_DEVICE, "%s: unreadable reply or verification failed", what);

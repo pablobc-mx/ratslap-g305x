@@ -435,20 +435,75 @@ int hidpp_request(struct hidpp_device *d, int feat_slot, uint8_t fn,
     return rc;
 }
 
-/* HID++ 2.0 error codes (the names Logitech's own tooling uses). */
-const char *hidpp_errname(int code)
+/* Send fn as a SHORT-report request (report ID 0x10, no software-id
+ * nibble, no params). EndWrite (0x8100 fn 8) is only defined on the
+ * short report: G HUB and libratbag send it that way, and the G305 X
+ * firmware rejects the long form with INVALID_ARGUMENT
+ * (owner-confirmed on real hardware). */
+int hidpp_request_short(struct hidpp_device *d, int feat_slot, uint8_t fn)
 {
-    switch (code) {
-    case 0x01: return "UNKNOWN";
-    case 0x02: return "INVALID_ARGUMENT";
-    case 0x03: return "OUT_OF_RANGE";
-    case 0x04: return "HARDWARE_ERROR";
-    case 0x05: return "LOGITECH_ERROR";
-    case 0x06: return "INVALID_FEATURE_INDEX";
-    case 0x07: return "INVALID_FUNCTION_ID";
-    case 0x08: return "BUSY";
-    case 0x09: return "UNSUPPORTED";
-    default:   return "UNKNOWN_CODE";
+    uint8_t req[HIDPP_LONG_LEN];
+    uint8_t rep[64];
+    uint8_t rdev, ridx, rfnsw, rparams[HIDPP_MAX_PARAMS];
+    uint8_t idx, fnsw = (uint8_t)(fn << 4);
+    enum hidpp_reply_kind kind;
+    long deadline;
+    int rc, len;
+
+    rc = hidpp_feature_index(d, feat_slot, slot_features[feat_slot]);
+    if (rc != RSLAP_RC_OK) {
+        d->err.feature = slot_features[feat_slot];
+        d->err.fn = fn;
+        return rc;
+    }
+    idx = d->idx[feat_slot];
+
+    memset(req, 0, sizeof(req));
+    req[0] = 0x10;
+    req[1] = d->devnum;
+    req[2] = idx;
+    req[3] = fnsw;
+
+    /* drain stale input reports first */
+    for (;;) {
+        len = (int)read(d->fd, rep, sizeof(rep));
+        if (len <= 0)
+            break;
+    }
+    if (write(d->fd, req, 7) != 7)
+        return RSLAP_RC_MALFORMED;
+
+    deadline = now_ms() + d->timeout_ms;
+    for (;;) {
+        long left = deadline - now_ms();
+
+        if (left <= 0)
+            return RSLAP_RC_TIMEOUT;
+        len = wait_readable(d->fd, (int)left);
+        if (len < 0)
+            return RSLAP_RC_MALFORMED;
+        if (len == 0)
+            return RSLAP_RC_TIMEOUT;
+        len = (int)read(d->fd, rep, sizeof(rep));
+        if (len < 0) {
+            if (errno == EAGAIN || errno == EINTR)
+                continue;
+            return RSLAP_RC_MALFORMED;
+        }
+        kind = hidpp_classify(rep, (size_t)len, &rdev, &ridx, &rfnsw, rparams);
+        if (kind == HIDPP_REPLY_IGNORE)
+            continue;
+        if (d->strict && rdev != d->devnum)
+            continue;
+        if (kind == HIDPP_REPLY_ERR2 && ridx == idx &&
+            (rfnsw == fnsw || (rfnsw & 0x0F) == HIDPP_SW_ID)) {
+            d->err.code = rparams[0];
+            d->err.feature = slot_features[feat_slot];
+            d->err.fn = fn;
+            return RSLAP_RC_HIDPP;
+        }
+        if (kind == HIDPP_REPLY_DATA && ridx == idx && rfnsw == fnsw)
+            return RSLAP_RC_OK;
     }
 }
 

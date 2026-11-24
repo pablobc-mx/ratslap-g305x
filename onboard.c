@@ -324,7 +324,7 @@ int rslap_ob_write_sector(const struct rslap_onboard *ob, int sector,
         if (rc != RSLAP_RC_OK)
             return rc;
     }
-    rc = hidpp_request(ob->dev, FEAT_ONBOARD, OB_FN_WRITE_END, NULL, 0, NULL);
+    rc = hidpp_request_short(ob->dev, FEAT_ONBOARD, OB_FN_WRITE_END);
     if (rc != RSLAP_RC_OK)
         return rc;
 

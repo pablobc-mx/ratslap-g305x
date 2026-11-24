@@ -322,8 +322,13 @@ static void onboard_fn(uint8_t *reply, uint8_t devnum,
         write_off += 16;
         reply_data(reply, devnum, idx, fnsw, NULL);
         return;
-    case 8: /* write end (data already landed, like real firmware) */
+    case 8: /* write end — short report only, see handle_frame */
+        if (write_sector < 0) {
+            reply_err2(reply, devnum, idx, fnsw, 2); /* no open session */
+            return;
+        }
         save_state();
+        write_sector = -1;
         reply_data(reply, devnum, idx, fnsw, NULL);
         return;
     case 0x0B: { /* get current dpi index */
@@ -354,6 +359,13 @@ static void handle_frame(const uint8_t *req, size_t len, uint8_t *reply)
     fn = (uint8_t)(fnsw >> 4);
     p = req + 4;
 
+    if (req[0] == 0x10) {
+        /* short-report requests: the tool only sends EndWrite this way
+         * (canonical form — G HUB and libratbag do the same) */
+        if (idx == 6 && fn == 8)
+            onboard_fn(reply, devnum, idx, fnsw, p);
+        return; /* any other short request: not part of this slice */
+    }
     if (req[0] != 0x11)
         return; /* not a long frame: ignore */
 
@@ -492,6 +504,13 @@ static void handle_frame(const uint8_t *req, size_t len, uint8_t *reply)
         return;
     }
     case 6: /* 0x8100 on-board profiles */
+        if (fn == 8) {
+            /* EndWrite is defined on the SHORT report only. Real firmware
+             * (owner-confirmed on a G305 X) rejects the long form with
+             * INVALID_ARGUMENT — mirror that so the regression sticks. */
+            reply_err2(reply, devnum, idx, fnsw, 2);
+            return;
+        }
         onboard_fn(reply, devnum, idx, fnsw, p);
         return;
     default:
@@ -584,8 +603,9 @@ ssize_t write(int fd, const void *buf, size_t count)
     e = fd_entry(fd);
     if (!e)
         return real_write(fd, buf, count);
-    if (count < 7 || ((const uint8_t *)buf)[0] != 0x11)
-        return (ssize_t)count; /* not a long HID++ frame: swallow */
+    if (count < 7 || (((const uint8_t *)buf)[0] != 0x11 &&
+                     ((const uint8_t *)buf)[0] != 0x10))
+        return (ssize_t)count; /* not an HID++ frame: swallow */
 
     if (e->dead) {
         reply_err1(reply, ((const uint8_t *)buf)[1],
