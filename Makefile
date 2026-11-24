@@ -12,7 +12,7 @@ BIN      = ratslap-g305x
 LIB_SRC  = src/hidpp.c src/onboard.c src/actions.c
 OBJ      = $(LIB_SRC:.c=.o) src/main.o
 
-TEST_BINS = tests/test_crc tests/test_hidpp tests/test_profile
+TEST_BINS = tests/test_crc tests/test_hidpp tests/test_profile tests/test_actions
 MOCK_SO   = tests/mock_hidraw.so
 
 all: $(BIN)
