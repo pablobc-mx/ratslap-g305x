@@ -8,7 +8,7 @@
 # reintroduce nested source directories.
 
 pkgname=ratslap-g305x
-pkgver=0.1.2
+pkgver=0.1.3
 pkgrel=1
 pkgdesc="Configure the Logitech G305 X on Linux: buttons, DPI, report rate, profiles (HID++, no daemon)"
 arch=('x86_64')
@@ -23,21 +23,21 @@ source=("Makefile" "util.h" "hidpp.h" "hidpp.c" "onboard.h" "onboard.c" \
         "42-g305x.rules" "README.md" "LICENSE")
 sha256sums=('9af6c0df7b74eade12afb4a97a14e813845f9330b54daca5293acf2488d7b4bf'
             '137bb80993d42431d70c4303bc34bd067adea2aee5b06bd22f8341a9c20c3a16'
-            '58a5f0194db5784eac71c7d4c18e0a2624c037b8df5a8686c11384d932a52bd7'
-            '3c0a13ab981d15dab7671aad438e86c5bacd797b91936167c999b2814cceef2a'
+            'fe94bcdc011115eb0e70747cb28baff7f29eb373dc982d4a0c68361777f94dd6'
+            'ceed7eb615f65730a586ac0e41435cec0bdce3d44fce0a59ef95223ef09c8f1b'
             '45f2acc96fc4b520d51c514a124548f8412db10d09d96445efcdfa90f44b9e86'
-            '6ff3b4924e4f1b58668098d0b9b591dc4041600ad0d01a6eb7c5eac3cba16322'
+            'b3f6f4a9c5a2165cf632808459e7c5bc6407dc406f8fc03e817bd7c14b9e5b09'
             '062ee159bfe85502866a2afb390d3b028a48e206369e3cc86694a8cd037546b6'
             '8f845d771e4c74ccabb5a8f188c8afe36cf2c99dff6abfed06d5a9b7cc159fe0'
-            '52faff5ebfecf39d7274a67b4d0ad6b05d43b7d4c3f4c62bed90a09789ad5400'
+            '7662f6cfd41463b7cdafc728a1ef44ebbc228469f8a6bc6183df58898a010121'
             '7e1ca5a9cf42c3d7bf6eb860752b4e67ef786a2b896e1958656cb87490855129'
             '087d2521d171a48ef00553914ba50dee5e29095c8d4b57111572a4ec973e35e4'
             '22c90a4d2829dbeaad46902508a2d4e9419ea4ac10dc725b78dff58e762555a7'
             '088609144ced62fb4e4e196ca4747c2ea6505c6fa13c2a8ec536d7c91b3cc871'
-            '6c66187bfaf4032290e18f4fb4740fbc1370fbf56cfdbfa4395c7e16c78c0ac7'
+            'd35c4c30343434c96c13e5e6758282b85bede99049d4684bfce52b8cc8010f25'
             '354559853b32e2c0b3d473d7f82302a898102c611ef8bd39a6c8c364f302030c'
             'a242112632dd0687af0981b7e722e294232df839b79454baef5904ff087ff281'
-            'cfa279e379193c3200bad0353b018284e4b3c790b4fc231f40ff2e110ea8799a'
+            'f0fc396bd4965087a97608f41fe20b282b6f739970bac2d1c9144e2832c6466a'
             '754aae16a664eb929dabad5514e9fe1a4d28602ccd98a652ba913be8db228f46'
             '504f90b50832d8f85ce54c1af1567cb3e7af6b8f4c23690181c96a846fa6ce36'
             '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986')

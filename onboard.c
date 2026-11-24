@@ -426,26 +426,48 @@ int rslap_ob_rom_sectors(const struct rslap_onboard *ob, int *out, int max)
 
 int rslap_ob_activate(struct rslap_onboard *ob, int sector)
 {
-    int cur = rslap_ob_get_current_sector(ob);
     struct rslap_dir_entry entries[8];
-    int rom_secs[8];
-    int nrom, ndir;
+    int cur, ndir, i, rc, need_write = 0;
 
+    cur = rslap_ob_get_current_sector(ob);
     if (cur < 0 && cur != sector)
         return cur; /* transport error other than "already there" */
 
+    /* Real firmware only accepts SetCurrentProfile for a sector that is
+     * listed as enabled in the user profile directory (sector 0). A
+     * factory-fresh device ships with a blank directory — every slot
+     * reads "unused" and the selection is refused with HID++ error 2
+     * (INVALID_ARGUMENT), exactly what the mock enforces. Create or
+     * enable the entry first, like G HUB's first onboard write. */
+    ndir = rslap_ob_read_directory(ob, 0, entries, 8);
+    if (ndir < 0)
+        return ndir;
+    for (i = 0; i < ndir; i++)
+        if (entries[i].sector == sector)
+            break;
+    if (i == ndir) { /* not listed: append */
+        if (ndir >= (int)(sizeof(entries) / sizeof(entries[0])))
+            return RSLAP_RC_REFUSED;
+        entries[ndir].sector = sector;
+        entries[ndir].enabled = 1;
+        ndir++;
+        need_write = 1;
+    } else if (!entries[i].enabled) {
+        entries[i].enabled = 1;
+        need_write = 1;
+    }
+    if (need_write) {
+        rc = rslap_ob_write_directory(ob, entries, ndir);
+        if (rc != RSLAP_RC_OK)
+            return rc;
+    }
+
     if (cur == sector) {
-        /* re-selecting may not re-apply; hop to another profile first */
-        nrom = rslap_ob_rom_sectors(ob, rom_secs, 8);
-        for (int i = 0; i < nrom; i++) {
-            if (rom_secs[i] != sector)
-                rslap_ob_set_current_sector(ob, rom_secs[i]); /* best effort */
-        }
-        ndir = rslap_ob_read_directory(ob, 0, entries, 8);
-        for (int i = 0; i < ndir; i++) {
+        /* re-selecting may not re-apply; hop to another enabled user
+         * slot first (ROM profiles are read-only, never selectable) */
+        for (i = 0; i < ndir; i++)
             if (entries[i].enabled && entries[i].sector != sector)
                 rslap_ob_set_current_sector(ob, entries[i].sector); /* best effort */
-        }
     }
     return rslap_ob_set_current_sector(ob, sector);
 }

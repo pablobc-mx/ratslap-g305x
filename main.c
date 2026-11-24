@@ -113,7 +113,7 @@ static void unit_hex(const uint8_t unit[4], char *out, size_t outlen)
     snprintf(out, outlen, "%02X%02X%02X%02X", unit[0], unit[1], unit[2], unit[3]);
 }
 
-static int rc_exit(int rc, const char *what)
+static int rc_exit(const struct app *a, int rc, const char *what)
 {
     switch (rc) {
     case RSLAP_RC_OK:
@@ -121,7 +121,9 @@ static int rc_exit(int rc, const char *what)
     case RSLAP_RC_TIMEOUT:
         die(EX_DEVICE, "%s: no reply from the device (timeout)", what);
     case RSLAP_RC_HIDPP:
-        die(EX_DEVICE, "%s: HID++ error", what);
+        die(EX_DEVICE, "%s: HID++ error 0x%02X (%s) from feature 0x%04X fn %d",
+            what, a->dev.err.code, hidpp_errname(a->dev.err.code),
+            a->dev.err.feature, a->dev.err.fn);
     case RSLAP_RC_MALFORMED:
         die(EX_DEVICE, "%s: unreadable reply or verification failed", what);
     case RSLAP_RC_REFUSED:
@@ -271,7 +273,7 @@ static void open_app(struct app *a, const char *match)
     discover(a, match);
     rc = rslap_ob_init(&a->ob, &a->dev);
     if (rc != RSLAP_RC_OK)
-        rc_exit(rc, "reading on-board memory info");
+        rc_exit(a, rc, "reading on-board memory info");
 }
 
 /* ----------------------------------------------------------------- render */
@@ -351,14 +353,14 @@ static void read_active_sector(const struct app *a, uint8_t *raw, int *sector_ou
     int rc;
 
     if (sector < 0)
-        rc_exit(sector, "reading the active profile");
+        rc_exit(a, sector, "reading the active profile");
     if (sector >= RSLAP_ROM_BASE)
         die(EX_DEVICE,
             "the factory ROM profile is active; run 'activate N' to pick a "
             "writable slot first");
     rc = rslap_ob_read_sector(&a->ob, sector, raw, RSLAP_MAX_SECTOR);
     if (rc != RSLAP_RC_OK)
-        rc_exit(rc, "reading the active profile");
+        rc_exit(a, rc, "reading the active profile");
     *sector_out = sector;
 }
 
@@ -494,16 +496,16 @@ static int cmd_active(struct app *a)
     int rc;
 
     if (sector < 0)
-        rc_exit(sector, "reading the active profile");
+        rc_exit(a, sector, "reading the active profile");
     rc = rslap_ob_read_sector(&a->ob, sector, raw, sizeof(raw));
     if (rc != RSLAP_RC_OK)
-        rc_exit(rc, "reading the active profile");
+        rc_exit(a, rc, "reading the active profile");
     if (!rslap_crc_ok(raw, (size_t)a->ob.info.sector_size))
         die(EX_DEVICE, "active profile sector 0x%04X has an invalid CRC", sector);
     rc = rslap_profile_decode(&p, raw, (size_t)a->ob.info.sector_size, sector,
                               a->ob.info.fmt, a->ob.info.button_count);
     if (rc != RSLAP_RC_OK)
-        rc_exit(rc, "decoding the active profile");
+        rc_exit(a, rc, "decoding the active profile");
     print_profile(&a->ob, &p, 1);
     return 0;
 }
@@ -672,7 +674,7 @@ static int cmd_button(struct app *a, int argc, char **argv, int force, int gshif
     int rc = rslap_ob_write_sector(&a->ob, sector, raw, (size_t)a->ob.info.sector_size);
 
     if (rc != RSLAP_RC_OK)
-        rc_exit(rc, "writing the button binding");
+        rc_exit(a, rc, "writing the button binding");
     rslap_describe_binding(binding, desc, sizeof(desc));
     printf("%sG%d = %s written to slot %d (verified)\n",
            gshift ? "G-shift " : "", n, desc, sector);
@@ -713,7 +715,7 @@ static int cmd_dpi(struct app *a, int argc, char **argv, int force)
         if (rc != RSLAP_RC_OK) {
             if (preview)
                 rslap_ob_set_mode(&a->ob, RSLAP_MODE_ONBOARD);
-            rc_exit(rc, "setting live DPI");
+            rc_exit(a, rc, "setting live DPI");
         }
         if (preview)
             rslap_ob_set_mode(&a->ob, RSLAP_MODE_ONBOARD);
@@ -774,7 +776,7 @@ static int cmd_dpi(struct app *a, int argc, char **argv, int force)
     int rc = rslap_ob_write_sector(&a->ob, sector, raw, (size_t)a->ob.info.sector_size);
 
     if (rc != RSLAP_RC_OK)
-        rc_exit(rc, "writing the DPI level");
+        rc_exit(a, rc, "writing the DPI level");
     printf("DPI level %d -> %d x %d written to slot %d (verified)\n",
            level, x, y, sector);
     return 0;
@@ -817,7 +819,7 @@ static int cmd_rate(struct app *a, int argc, char **argv, int force)
     int rc = rslap_ob_write_sector(&a->ob, sector, raw, (size_t)a->ob.info.sector_size);
 
     if (rc != RSLAP_RC_OK)
-        rc_exit(rc, "writing the report rate");
+        rc_exit(a, rc, "writing the report rate");
     printf("report rate %d Hz written to slot %d (verified)\n", hz, sector);
     return 0;
 }
@@ -833,7 +835,7 @@ static int cmd_activate(struct app *a, int argc, char **argv)
         die(EX_USAGE, "profile slot must be 1..%d", a->ob.info.profile_count);
     rc = rslap_ob_activate(&a->ob, n);
     if (rc != RSLAP_RC_OK)
-        rc_exit(rc, "activating the profile");
+        rc_exit(a, rc, "activating the profile");
     printf("active profile: slot %d\n", n);
     return 0;
 }
@@ -853,7 +855,7 @@ static int cmd_reset(struct app *a, int argc, char **argv, int force)
         int cur = rslap_ob_get_current_sector(&a->ob);
 
         if (cur < 0)
-            rc_exit(cur, "reading the active profile");
+            rc_exit(a, cur, "reading the active profile");
         slot = (cur >= RSLAP_ROM_BASE) ? 1 : cur;
     }
 
@@ -862,12 +864,12 @@ static int cmd_reset(struct app *a, int argc, char **argv, int force)
         die(EX_DEVICE, "cannot read the factory profile from ROM");
     rc = rslap_ob_read_sector(&a->ob, rom_secs[0], romraw, sizeof(romraw));
     if (rc != RSLAP_RC_OK)
-        rc_exit(rc, "reading the ROM profile");
+        rc_exit(a, rc, "reading the ROM profile");
 
     gate_write(a, force);
     rc = rslap_ob_write_sector(&a->ob, slot, romraw, (size_t)a->ob.info.sector_size);
     if (rc != RSLAP_RC_OK)
-        rc_exit(rc, "writing the ROM copy");
+        rc_exit(a, rc, "writing the ROM copy");
     printf("slot %d reset to the factory profile (verified)\n", slot);
     return 0;
 }

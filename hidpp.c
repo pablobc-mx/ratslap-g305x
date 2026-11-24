@@ -435,6 +435,23 @@ int hidpp_request(struct hidpp_device *d, int feat_slot, uint8_t fn,
     return rc;
 }
 
+/* HID++ 2.0 error codes (the names Logitech's own tooling uses). */
+const char *hidpp_errname(int code)
+{
+    switch (code) {
+    case 0x01: return "UNKNOWN";
+    case 0x02: return "INVALID_ARGUMENT";
+    case 0x03: return "OUT_OF_RANGE";
+    case 0x04: return "HARDWARE_ERROR";
+    case 0x05: return "LOGITECH_ERROR";
+    case 0x06: return "INVALID_FEATURE_INDEX";
+    case 0x07: return "INVALID_FUNCTION_ID";
+    case 0x08: return "BUSY";
+    case 0x09: return "UNSUPPORTED";
+    default:   return "UNKNOWN_CODE";
+    }
+}
+
 /* ---------------------------------------------------- feature conveniences */
 
 int hidpp_get_name(struct hidpp_device *d, char *out, size_t outlen)

@@ -106,6 +106,14 @@ static void load_sectors(void)
     memcpy(sectors[0x101], GOLDEN_V7_ROM, GOLDEN_SECTOR_SIZE);
     memcpy(sectors[0x100], GOLDEN_ROMDIR, GOLDEN_SECTOR_SIZE);
     memcpy(sectors[0], GOLDEN_DIR, GOLDEN_SECTOR_SIZE);
+    if (getenv("MOCK_BLANK_DIR")) {
+        /* Factory-fresh device: blank user directory, ROM profile active —
+         * the state a new G305 X ships in (owner-confirmed: every slot
+         * shows "unused" and the active sector is the ROM one). */
+        memset(sectors[0], 0xFF, GOLDEN_SECTOR_SIZE);
+        if (getenv("MOCK_ROM_ACTIVE"))
+            cur_sector = 0x0101;
+    }
     memcpy(sectors[1], GOLDEN_V7, GOLDEN_SECTOR_SIZE);
 
     p = getenv("MOCK_STATE");

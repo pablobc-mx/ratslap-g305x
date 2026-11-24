@@ -93,6 +93,9 @@ struct hidpp_err {
     uint8_t fn;
 };
 
+/* Name for an HID++ 2.0 error code, for diagnostics. */
+const char *hidpp_errname(int code);
+
 struct hidpp_device {
     int fd;
     uint8_t devnum;

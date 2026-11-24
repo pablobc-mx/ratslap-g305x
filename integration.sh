@@ -113,6 +113,18 @@ check_grep "activate slot 2" "active profile: slot 2" $BIN activate 2
 check_grep "info marks slot 2 active" "slot 2 (active)" $BIN info
 check_grep "activate slot 1 back (hop path)" "active profile: slot 1" $BIN activate 1
 
+echo "== factory-fresh device (blank user directory, ROM active)"
+FRESH="$TMP/fresh.bin"
+check_grep "activate creates the directory entry and selects slot 1" \
+    "active profile: slot 1" env MOCK_STATE="$FRESH" MOCK_BLANK_DIR=1 MOCK_ROM_ACTIVE=1 \
+    $BIN activate 1
+check_grep "fresh device: slot 1 is active, not unused" "slot 1 (active)" \
+    env MOCK_STATE="$FRESH" $BIN info
+check_grep "fresh device: other slots still unused" "unused slot 2" \
+    env MOCK_STATE="$FRESH" $BIN info
+check_grep "second activate appends another directory entry" \
+    "active profile: slot 3" env MOCK_STATE="$FRESH" $BIN activate 3
+
 echo "== reset (factory ROM copy)"
 check_grep "reset copies ROM over the active slot" "reset to the factory profile" \
     $BIN reset --yes
