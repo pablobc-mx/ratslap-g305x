@@ -924,6 +924,18 @@ int main(int argc, char **argv)
     if (strcmp(cmd, "list") == 0)
         return cmd_list(match);
 
+    /* validate the command before touching any device, so usage errors
+     * exit 3 even with no mouse attached */
+    if (cmd[0] != '\0' && strcmp(cmd, "info") != 0 &&
+        strcmp(cmd, "backup") != 0 && strcmp(cmd, "restore") != 0 &&
+        strcmp(cmd, "button") != 0 && strcmp(cmd, "gbutton") != 0 &&
+        strcmp(cmd, "dpi") != 0 && strcmp(cmd, "rate") != 0 &&
+        strcmp(cmd, "activate") != 0 && strcmp(cmd, "reset") != 0) {
+        fprintf(stderr, "unknown command '%s'\n\n", cmd);
+        usage(stderr);
+        return EX_USAGE;
+    }
+
     open_app(&a, match);
 
     if (cmd[0] == '\0')
@@ -953,7 +965,7 @@ int main(int argc, char **argv)
     if (strcmp(cmd, "reset") == 0)
         return cmd_reset(&a, nargs, args, force);
 
-    fprintf(stderr, "unknown command '%s'\n\n", cmd);
+    fprintf(stderr, "unknown command '%s'\n\n", cmd); /* unreachable: validated above */
     usage(stderr);
     return EX_USAGE;
 }
