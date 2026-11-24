@@ -128,6 +128,12 @@ Currently known for this family:
 | `046d:b046` | G305 X SUPERLIGHT (Bluetooth sibling) | from OpenGMice |
 | `046d:4074` | G305 LIGHTSPEED (original, format 3) | long-known |
 
+Verified end-to-end in hardware (2026-11): a G305 X SUPERLIGHT on
+firmware `MPM 39.00.0012`, connected through the `046d:c547` receiver —
+`list`, `info` (format-7 decode, battery, live DPI / report rate),
+`backup` and the modify-safety gate all behave exactly as the mock
+integration test predicts.
+
 Discovery is **runtime**: the tool scans `/dev/hidraw*`, pings HID++ 2.0,
 walks the root/feature-set, and keeps devices exposing on-board profiles
 (`0x8100`). The table above only feeds the udev rule comments — it is
