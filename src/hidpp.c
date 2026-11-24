@@ -1,25 +1,91 @@
-/* stub — HID++ transport implemented after the tests exist. */
+/* stubs for the device-facing transport; frame helpers are real
+ * (test_hidpp.c drove their implementation). */
 #include "hidpp.h"
+#include <string.h>
+
+static const char *const hidpp_errors[] = {
+    "no error", "unknown", "invalid argument", "out of range", "hardware error",
+    "logitech internal", "invalid feature index", "invalid function", "busy",
+    "unsupported",
+};
 
 const char *hidpp_strerror(int code)
 {
-    (void)code;
-    return "stub";
+    if (code < 0 || (size_t)code >= sizeof(hidpp_errors) / sizeof(hidpp_errors[0]))
+        return "?";
+    return hidpp_errors[code];
 }
 
 int hidpp_build_request(uint8_t *out, size_t outlen, uint8_t devnum, uint8_t idx,
                         uint8_t fn, const uint8_t *params, size_t nparams)
 {
-    (void)out; (void)outlen; (void)devnum; (void)idx; (void)fn; (void)params; (void)nparams;
-    return -1;
+    if (outlen < HIDPP_LONG_LEN || nparams > HIDPP_LONG_LEN - 4)
+        return -1;
+    out[0] = 0x11;
+    out[1] = devnum;
+    out[2] = idx;
+    out[3] = (uint8_t)((fn << 4) | HIDPP_SW_ID);
+    if (nparams)
+        memcpy(out + 4, params, nparams);
+    memset(out + 4 + nparams, 0, HIDPP_LONG_LEN - 4 - nparams);
+    return HIDPP_LONG_LEN;
 }
 
 enum hidpp_reply_kind hidpp_classify(const uint8_t *buf, size_t len,
                                      uint8_t *devnum_out, uint8_t *idx_out,
                                      uint8_t *fnsw_out, uint8_t *params_out)
 {
-    (void)buf; (void)len; (void)devnum_out; (void)idx_out; (void)fnsw_out; (void)params_out;
-    return HIDPP_REPLY_IGNORE;
+    uint8_t devnum, idx, fnsw;
+
+    if (buf == NULL || len < 7)
+        return HIDPP_REPLY_IGNORE;
+    if (buf[0] != 0x10 && buf[0] != 0x11)
+        return HIDPP_REPLY_IGNORE;
+    devnum = buf[1];
+    idx = buf[2];
+    fnsw = buf[3];
+
+    if (idx == 0x8F) {
+        /* HID++ 1.0 error: [rep, dev, 0x8F, idx, fnsw, code, ...] */
+        if (devnum_out)
+            *devnum_out = devnum;
+        if (idx_out)
+            *idx_out = buf[3];
+        if (fnsw_out)
+            *fnsw_out = fnsw;
+        if (params_out) {
+            memset(params_out, 0, HIDPP_MAX_PARAMS);
+            params_out[0] = buf[5];
+        }
+        return HIDPP_REPLY_ERR1;
+    }
+    if (idx == 0xFF) {
+        /* HID++ 2.0 error: [rep, dev, 0xFF, featidx, fnsw, code, ...] */
+        if (devnum_out)
+            *devnum_out = devnum;
+        if (idx_out)
+            *idx_out = buf[3];
+        if (fnsw_out)
+            *fnsw_out = buf[4];
+        if (params_out) {
+            memset(params_out, 0, HIDPP_MAX_PARAMS);
+            params_out[0] = buf[5];
+        }
+        return HIDPP_REPLY_ERR2;
+    }
+    /* data reply: params are bytes 4..19, zero padded past report length */
+    if (devnum_out)
+        *devnum_out = devnum;
+    if (idx_out)
+        *idx_out = idx;
+    if (fnsw_out)
+        *fnsw_out = fnsw;
+    if (params_out) {
+        memset(params_out, 0, HIDPP_MAX_PARAMS);
+        memcpy(params_out, buf + 4, len - 4 > (size_t)HIDPP_MAX_PARAMS
+                   ? (size_t)HIDPP_MAX_PARAMS : len - 4);
+    }
+    return HIDPP_REPLY_DATA;
 }
 
 int hidpp_scan(struct hidpp_candidate *out, int max)
