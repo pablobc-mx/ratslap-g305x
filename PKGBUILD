@@ -8,7 +8,7 @@
 # reintroduce nested source directories.
 
 pkgname=ratslap-g305x
-pkgver=0.1.1
+pkgver=0.1.2
 pkgrel=1
 pkgdesc="Configure the Logitech G305 X on Linux: buttons, DPI, report rate, profiles (HID++, no daemon)"
 arch=('x86_64')
@@ -34,7 +34,7 @@ sha256sums=('9af6c0df7b74eade12afb4a97a14e813845f9330b54daca5293acf2488d7b4bf'
             '087d2521d171a48ef00553914ba50dee5e29095c8d4b57111572a4ec973e35e4'
             '22c90a4d2829dbeaad46902508a2d4e9419ea4ac10dc725b78dff58e762555a7'
             '088609144ced62fb4e4e196ca4747c2ea6505c6fa13c2a8ec536d7c91b3cc871'
-            '9e332af627cd83da748b73218d3841b6c125b3b422b06d1e291156fa4b60ac90'
+            '6c66187bfaf4032290e18f4fb4740fbc1370fbf56cfdbfa4395c7e16c78c0ac7'
             '354559853b32e2c0b3d473d7f82302a898102c611ef8bd39a6c8c364f302030c'
             'a242112632dd0687af0981b7e722e294232df839b79454baef5904ff087ff281'
             'cfa279e379193c3200bad0353b018284e4b3c790b4fc231f40ff2e110ea8799a'

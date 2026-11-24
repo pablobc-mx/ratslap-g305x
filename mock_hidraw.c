@@ -65,7 +65,11 @@ static int write_sector = -1;
 static int write_off;
 static int live_dpi = 800;
 
-static const char MOCK_MAGIC[10] = "RSLAPMOCK1";
+/* Exactly 10 bytes, deliberately NOT NUL-terminated: the whole array is
+ * written into the state file and memcmp'd back byte for byte. The
+ * nonstring attribute tells GCC 15+ (-Wunterminated-string-initialization,
+ * on by default there) that the truncated initializer is intentional. */
+static const char MOCK_MAGIC[10] __attribute__((nonstring)) = "RSLAPMOCK1";
 
 /* Sector state persists across processes via $MOCK_STATE so integration
  * steps that run the binary as separate invocations still see writes. */
