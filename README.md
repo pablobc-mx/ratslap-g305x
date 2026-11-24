@@ -54,7 +54,7 @@ use `profilenext` / `profileprev` / `profilecycle` on a button, or the
 ## Install (Arch Linux, one paste)
 
 ```bash
-git clone https://github.com/OWNER/ratslap-g305x && cd ratslap-g305x && makepkg -si
+git clone https://github.com/pablobc-mx/ratslap-g305x && cd ratslap-g305x && makepkg -si
 ```
 
 Then install the udev rule (once per machine) and replug the mouse or its
