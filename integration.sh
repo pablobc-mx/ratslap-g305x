@@ -120,7 +120,7 @@ check_grep "activate creates the directory entry and selects slot 1" \
     $BIN activate 1
 check_grep "fresh device: slot 1 is active, not unused" "slot 1 (active)" \
     env MOCK_STATE="$FRESH" $BIN info
-check_grep "fresh device: the whole directory was reconstructed" "Default — slot 2" \
+check_grep "fresh device: untargeted slots listed but disabled (canonical shape)" "unused slot 2" \
     env MOCK_STATE="$FRESH" $BIN info
 check_grep "second activate selects slot 3 from the reconstructed directory" \
     "active profile: slot 3" env MOCK_STATE="$FRESH" $BIN activate 3

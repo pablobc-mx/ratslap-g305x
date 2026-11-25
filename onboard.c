@@ -395,6 +395,18 @@ int rslap_ob_read_directory(const struct rslap_onboard *ob, int rom,
     return n;
 }
 
+static void render_directory(uint8_t *raw, int size,
+                             const struct rslap_dir_entry *entries, int n)
+{
+    memset(raw, 0xFF, (size_t)size);
+    for (int i = 0; i < n; i++) {
+        raw[4 * i] = (uint8_t)(entries[i].sector >> 8);
+        raw[4 * i + 1] = (uint8_t)entries[i].sector;
+        raw[4 * i + 2] = (uint8_t)(entries[i].enabled ? 1 : 0);
+    }
+    rslap_with_crc(raw, (size_t)size);
+}
+
 int rslap_ob_write_directory(const struct rslap_onboard *ob,
                             const struct rslap_dir_entry *entries, int n)
 {
@@ -403,13 +415,7 @@ int rslap_ob_write_directory(const struct rslap_onboard *ob,
 
     if (size > RSLAP_MAX_SECTOR || n * 4 + 2 > size)
         return RSLAP_RC_REFUSED;
-    memset(raw, 0xFF, (size_t)size);
-    for (int i = 0; i < n; i++) {
-        raw[4 * i] = (uint8_t)(entries[i].sector >> 8);
-        raw[4 * i + 1] = (uint8_t)entries[i].sector;
-        raw[4 * i + 2] = (uint8_t)(entries[i].enabled ? 1 : 0);
-    }
-    rslap_with_crc(raw, (size_t)size);
+    render_directory(raw, size, entries, n);
     return rslap_ob_write_sector(ob, 0, raw, (size_t)size);
 }
 
@@ -433,62 +439,80 @@ int rslap_ob_rom_sectors(const struct rslap_onboard *ob, int *out, int max)
 
 int rslap_ob_activate(struct rslap_onboard *ob, int sector)
 {
-    struct rslap_dir_entry entries[8];
-    int cur, ndir, i, rc, need_write = 0;
+    struct rslap_dir_entry entries[8], canon[8];
+    int cur, ndir, nslots, i, rc;
 
     cur = rslap_ob_get_current_sector(ob);
     if (cur < 0 && cur != sector)
         return cur; /* transport error other than "already there" */
 
-    /* Real firmware only accepts SetCurrentProfile for a sector that is
-     * listed as enabled in the user profile directory (sector 0). A
-     * factory-fresh device ships with a blank directory — every slot
-     * reads "unused" and the selection is refused with HID++ error 2
-     * (INVALID_ARGUMENT), exactly what the mock enforces. Create or
-     * enable the entry first, like G HUB's first onboard write. */
     ndir = rslap_ob_read_directory(ob, 0, entries, 8);
     if (ndir < 0)
         return ndir;
-    for (i = 0; i < ndir; i++)
-        if (entries[i].sector == sector)
-            break;
-    if (ndir == 0) {
-        /* Factory-fresh blank directory: reconstruct the configured-device
-         * shape, the same thing libratbag's write_dict builds — every
-         * slot listed in order, all enabled. */
-        int nslots = ob->info.profile_count;
 
-        if (nslots > (int)(sizeof(entries) / sizeof(entries[0])))
-            nslots = (int)(sizeof(entries) / sizeof(entries[0]));
-        for (i = 0; i < nslots; i++) {
-            entries[i].sector = i + 1;
-            entries[i].enabled = 1;
-        }
-        ndir = nslots;
-        need_write = 1;
-    } else if (i == ndir) { /* partial directory: merge the target in */
-        if (ndir >= (int)(sizeof(entries) / sizeof(entries[0])))
-            return RSLAP_RC_REFUSED;
-        entries[ndir].sector = sector;
-        entries[ndir].enabled = 1;
-        ndir++;
-        need_write = 1;
-    } else if (!entries[i].enabled) {
-        entries[i].enabled = 1;
-        need_write = 1;
+    /* Canonical directory shape (OpenGMice save_profiles parity, the
+     * G305 X family's own tool): every slot 1..profile_count listed in
+     * order, unlisted slots disabled, the target enabled. A blank or
+     * partial directory is normalized to this shape before selecting —
+     * the firmware refuses SetCurrentProfile otherwise (HID++ error 2,
+     * owner-confirmed: a lone {target: enabled} entry is not enough). */
+    nslots = ob->info.profile_count;
+    if (nslots > (int)(sizeof(entries) / sizeof(entries[0])))
+        nslots = (int)(sizeof(entries) / sizeof(entries[0]));
+    for (i = 0; i < nslots; i++) {
+        int en = 0;
+
+        for (int j = 0; j < ndir; j++)
+            if (entries[j].sector == i + 1)
+                en = entries[j].enabled;
+        canon[i].sector = i + 1;
+        canon[i].enabled = (i + 1 == sector) ? 1 : en;
     }
-    if (need_write) {
-        rc = rslap_ob_write_directory(ob, entries, ndir);
-        if (rc != RSLAP_RC_OK)
-            return rc;
+
+    /* the target slot must hold a valid profile before it can be
+     * selected; a never-written or corrupt slot gets the factory ROM
+     * copy (what 'reset N' writes) */
+    {
+        uint8_t raw[RSLAP_MAX_SECTOR];
+
+        rc = rslap_ob_read_sector(ob, sector, raw, sizeof(raw));
+        if (rc != RSLAP_RC_OK ||
+            !rslap_crc_ok(raw, (size_t)ob->info.sector_size)) {
+            uint8_t romraw[RSLAP_MAX_SECTOR];
+            int rom_secs[8], nrom = rslap_ob_rom_sectors(ob, rom_secs, 8);
+
+            if (nrom < 1)
+                return RSLAP_RC_REFUSED;
+            rc = rslap_ob_read_sector(ob, rom_secs[0], romraw, sizeof(romraw));
+            if (rc != RSLAP_RC_OK)
+                return rc;
+            rc = rslap_ob_write_sector(ob, sector, romraw,
+                                       (size_t)ob->info.sector_size);
+            if (rc != RSLAP_RC_OK)
+                return rc;
+        }
+    }
+
+    /* rewrite the directory only when the bytes differ */
+    {
+        uint8_t want[RSLAP_MAX_SECTOR], have[RSLAP_MAX_SECTOR];
+
+        render_directory(want, ob->info.sector_size, canon, nslots);
+        rc = rslap_ob_read_sector(ob, 0, have, sizeof(have));
+        if (rc != RSLAP_RC_OK ||
+            memcmp(want, have, (size_t)ob->info.sector_size) != 0) {
+            rc = rslap_ob_write_sector(ob, 0, want, (size_t)ob->info.sector_size);
+            if (rc != RSLAP_RC_OK)
+                return rc;
+        }
     }
 
     if (cur == sector) {
         /* re-selecting may not re-apply; hop to another enabled user
          * slot first (ROM profiles are read-only, never selectable) */
-        for (i = 0; i < ndir; i++)
-            if (entries[i].enabled && entries[i].sector != sector)
-                rslap_ob_set_current_sector(ob, entries[i].sector); /* best effort */
+        for (i = 0; i < nslots; i++)
+            if (canon[i].enabled && canon[i].sector != sector)
+                rslap_ob_set_current_sector(ob, canon[i].sector); /* best effort */
     }
     return rslap_ob_set_current_sector(ob, sector);
 }

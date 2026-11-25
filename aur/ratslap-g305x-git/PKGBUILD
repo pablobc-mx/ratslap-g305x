@@ -4,7 +4,7 @@
 # tag below when a new release comes out).
 
 pkgname=ratslap-g305x-git
-pkgver=0.1.5
+pkgver=0.1.6
 pkgrel=1
 pkgdesc="Configure the Logitech G305 X on Linux: buttons, DPI, report rate, profiles (HID++, no daemon)"
 arch=('x86_64')
