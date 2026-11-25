@@ -34,9 +34,12 @@ int main(void)
     CHECK(rslap_crc_ccitt(GOLDEN_DIR, GOLDEN_SECTOR_SIZE - 2) == GOLDEN_DIR_CRC);
     CHECK(rslap_crc_ccitt(GOLDEN_ROMDIR, GOLDEN_SECTOR_SIZE - 2) == GOLDEN_ROMDIR_CRC);
 
-    /* crc_ok accepts all golden sectors and rejects any single-bit change */
+    /* crc_ok accepts all golden sectors and rejects any single-bit change.
+     * GOLDEN_V7_ROM is the exception by design: the factory ROM sector
+     * carries no valid CRC (owner-confirmed on a real G305 X — mirror of
+     * hardware), so only the user/directory sectors validate. */
     CHECK(rslap_crc_ok(GOLDEN_V7, GOLDEN_SECTOR_SIZE));
-    CHECK(rslap_crc_ok(GOLDEN_V7_ROM, GOLDEN_SECTOR_SIZE));
+    CHECK(!rslap_crc_ok(GOLDEN_V7_ROM, GOLDEN_SECTOR_SIZE));
     CHECK(rslap_crc_ok(GOLDEN_DIR, GOLDEN_SECTOR_SIZE));
     {
         uint8_t buf[GOLDEN_SECTOR_SIZE];

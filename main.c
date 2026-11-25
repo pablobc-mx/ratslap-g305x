@@ -865,6 +865,9 @@ static int cmd_reset(struct app *a, int argc, char **argv, int force)
     rc = rslap_ob_read_sector(&a->ob, rom_secs[0], romraw, sizeof(romraw));
     if (rc != RSLAP_RC_OK)
         rc_exit(a, rc, "reading the ROM profile");
+    /* factory ROM sectors carry no valid CRC (owner-confirmed on a real
+     * G305 X); re-seal the copy so the write guard accepts it */
+    rslap_with_crc(romraw, (size_t)a->ob.info.sector_size);
 
     gate_write(a, force);
     rc = rslap_ob_write_sector(&a->ob, slot, romraw, (size_t)a->ob.info.sector_size);

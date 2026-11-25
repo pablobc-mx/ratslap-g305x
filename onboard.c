@@ -486,6 +486,9 @@ int rslap_ob_activate(struct rslap_onboard *ob, int sector)
             rc = rslap_ob_read_sector(ob, rom_secs[0], romraw, sizeof(romraw));
             if (rc != RSLAP_RC_OK)
                 return rc;
+            /* factory ROM sectors carry no valid CRC (owner-confirmed);
+             * re-seal the copy so the write guard accepts it */
+            rslap_with_crc(romraw, (size_t)ob->info.sector_size);
             rc = rslap_ob_write_sector(ob, sector, romraw,
                                        (size_t)ob->info.sector_size);
             if (rc != RSLAP_RC_OK)

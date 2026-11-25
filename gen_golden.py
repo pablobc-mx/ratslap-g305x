@@ -103,6 +103,11 @@ gold_v7, crc_v7 = v7([(400, 400, 1), (800, 800, 1), (1600, 1600, 2),
                      (3200, 3200, 2), (6400, 6400, 0)], 1, 0, user_buttons, "Profile 1")
 rom_v7, crc_rom = v7([(800, 800, 1), (1600, 1600, 1), (3200, 3200, 1)],
                      0, 0, rom_buttons, "Default")
+# Owner-confirmed on a real G305 X: the factory ROM profile sector carries
+# no valid CRC — the tool decodes it, but crc_ok() on it fails, and the
+# write guard refuses to copy ROM raw bytes anywhere. OpenGMice likewise
+# never writes ROM raw; mirror the factory bytes here.
+rom_v7 = rom_v7[:-2] + b"\xff\xff"
 gold_v1, crc_v1 = v1([400, 800, 1600, 3200, 6400], 1, 0, user_buttons, "Profile 1")
 dir_user, crc_dir = directory([(1, True), (2, True)])
 dir_rom, crc_romdir = directory([(0x101, True)])
