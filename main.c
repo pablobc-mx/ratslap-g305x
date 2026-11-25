@@ -7,6 +7,7 @@
 #include "hidpp.h"
 #include "onboard.h"
 #include "actions.h"
+#include "g300s.h"
 #include <ctype.h>
 #include <errno.h>
 #include <sys/stat.h>
@@ -18,6 +19,8 @@
 #define RSLAP_VERSION "0.1.0"
 #define PROBE_MS 600
 
+enum app_family { FAM_HIDPP, FAM_G300S };
+
 struct app {
     struct hidpp_device dev;
     struct rslap_onboard ob;
@@ -28,6 +31,9 @@ struct app {
     uint8_t unit[4];
     int has_unit;
     uint16_t models[3];
+    enum app_family family;
+    int g300s_fd;
+    struct g300s_mode g300s_modes[G300S_MODE_COUNT];
 };
 
 void die(int code, const char *fmt, ...);
@@ -59,6 +65,9 @@ static void usage(FILE *f)
         "  rate HZ              report rate 125|250|500|1000 (wireless and wired)\n"
         "  activate N           make profile slot N the active one\n"
         "  reset [N]            copy the factory ROM profile over slot N\n"
+        "\n"
+        "The Logitech G300/G300s (046d:c246) is supported read-only:\n"
+        "list, info and backup work; writes arrive with the write slice.\n"
         "\n"
         "exit codes: 0 ok · 1 no compatible device · 2 device/protocol error ·\n"
         "            3 usage · 4 refused (no backup, no --yes)\n",
@@ -219,6 +228,39 @@ nope:
     return -1;
 }
 
+/* Open a G300s config node. Of the mouse's two hidraw nodes only the
+ * second interface (HID_PHYS ...input1) answers the mode feature
+ * reports, so g300s_check() doubles as the node selector. */
+static int try_open_g300s(struct app *a, const struct hidpp_candidate *c)
+{
+    int fd;
+
+    if (c->vid != G300S_VID || c->pid != G300S_PID)
+        return -1;
+    fd = g300s_open(c->path);
+    if (fd < 0)
+        return errno == EACCES ? -2 : -1;
+    if (!g300s_check(fd)) {
+        close(fd);
+        return -1;
+    }
+    a->family = FAM_G300S;
+    a->g300s_fd = fd;
+    a->cand = *c;
+    snprintf(a->name, sizeof(a->name), "%s", c->name);
+    return 0;
+}
+
+static void close_found(struct app *a)
+{
+    if (a->family == FAM_G300S) {
+        close(a->g300s_fd);
+        a->g300s_fd = -1;
+    } else {
+        hidpp_close(&a->dev);
+    }
+}
+
 /* returns 0 with a->dev usable, or exits */
 static void discover(struct app *a, const char *match)
 {
@@ -233,20 +275,29 @@ static void discover(struct app *a, const char *match)
             saw_deny = 1;
             continue;
         }
-        if (rc != 0)
-            continue;
+        if (rc != 0) {
+            /* not an HID++ endpoint; a G300s answers here instead */
+            rc = try_open_g300s(a, &cands[i]);
+            if (rc == -2) {
+                saw_deny = 1;
+                continue;
+            }
+            if (rc != 0)
+                continue;
+        }
         saw_dev = 1;
         if (match) {
             char key[256], m[64];
+            uint16_t pid = a->family == FAM_G300S ? a->cand.pid : a->dev.pid;
 
-            snprintf(key, sizeof(key), "%s %04x", a->name, a->dev.pid);
+            snprintf(key, sizeof(key), "%s %04x", a->name, pid);
             for (size_t x = 0; key[x]; x++)
                 key[x] = (char)tolower((unsigned char)key[x]);
             snprintf(m, sizeof(m), "%s", match);
             for (size_t x = 0; m[x]; x++)
                 m[x] = (char)tolower((unsigned char)m[x]);
             if (!strstr(key, m)) {
-                hidpp_close(&a->dev);
+                close_found(a);
                 continue;
             }
         }
@@ -271,7 +322,9 @@ static void open_app(struct app *a, const char *match)
     memset(a, 0, sizeof(*a));
     a->dev.fd = -1;
     discover(a, match);
-    rc = rslap_ob_init(&a->ob, &a->dev);
+    rc = a->family == FAM_G300S
+        ? RSLAP_RC_OK /* no on-board memory model to read */
+        : rslap_ob_init(&a->ob, &a->dev);
     if (rc != RSLAP_RC_OK)
         rc_exit(a, rc, "reading on-board memory info");
 }
@@ -376,21 +429,27 @@ static int cmd_list(const char *match)
     int nseen = 0;
 
     for (int i = 0; i < n; i++) {
-        int rc = try_open(&a, &cands[i]);
+        int rc;
 
-        if (rc != 0)
-            continue;
+        memset(&a, 0, sizeof(a));
+        rc = try_open(&a, &cands[i]);
+        if (rc != 0) {
+            rc = try_open_g300s(&a, &cands[i]);
+            if (rc != 0)
+                continue;
+        }
         if (match) {
             char key[256], m[64];
+            uint16_t pid = a.family == FAM_G300S ? a.cand.pid : a.dev.pid;
 
-            snprintf(key, sizeof(key), "%s %04x", a.name, a.dev.pid);
+            snprintf(key, sizeof(key), "%s %04x", a.name, pid);
             for (size_t x = 0; key[x]; x++)
                 key[x] = (char)tolower((unsigned char)key[x]);
             snprintf(m, sizeof(m), "%s", match);
             for (size_t x = 0; m[x]; x++)
                 m[x] = (char)tolower((unsigned char)m[x]);
             if (!strstr(key, m)) {
-                hidpp_close(&a.dev);
+                close_found(&a);
                 continue;
             }
         }
@@ -403,14 +462,15 @@ static int cmd_list(const char *match)
                 if (memcmp(seen_units[j], a.unit, 4) == 0)
                     dup = 1;
             if (dup) {
-                hidpp_close(&a.dev);
+                close_found(&a);
                 continue;
             }
             if (nseen < 8)
                 memcpy(seen_units[nseen++], a.unit, 4);
         }
-        printf("%s  [%s, 046d:%04x, %s]\n", a.name, a.cand.link, a.dev.pid, a.cand.path);
-        hidpp_close(&a.dev);
+        printf("%s  [%s, 046d:%04x, %s]\n", a.name, a.cand.link,
+               a.family == FAM_G300S ? a.cand.pid : a.dev.pid, a.cand.path);
+        close_found(&a);
         shown++;
     }
     if (!shown) {
@@ -422,8 +482,86 @@ static int cmd_list(const char *match)
     return 0;
 }
 
+/* Render one G300s binding: "Button1", "LeftCtrl + V", "ModeSwitch",
+ * or "Disabled" when every slot is empty. */
+static void print_g300s_binding(char *out, size_t outlen,
+                               const struct g300s_binding *b)
+{
+    char mods[64], keybuf[16];
+    const char *tok[3];
+    int n = 0;
+
+    if (strcmp(g300s_button_name(b->btn), "NONE") != 0)
+        tok[n++] = g300s_button_name(b->btn);
+    g300s_mods_str(b->mods, mods, sizeof(mods));
+    if (mods[0])
+        tok[n++] = mods;
+    if (b->key) {
+        const char *k = g300s_key_name(b->key);
+
+        if (!k[0]) {
+            snprintf(keybuf, sizeof(keybuf), "key:0x%02x", b->key);
+            k = keybuf;
+        }
+        tok[n++] = k;
+    }
+
+    if (n == 0) {
+        snprintf(out, outlen, "Disabled");
+        return;
+    }
+    out[0] = '\0';
+    for (int i = 0; i < n && i < 3; i++) {
+        size_t len = strlen(out);
+
+        snprintf(out + len, outlen - len, "%s%s", i ? " + " : "", tok[i]);
+    }
+}
+
+static int g300s_info(struct app *a)
+{
+    static const char *const mode_names[G300S_MODE_COUNT] = {
+        "Mode 1", "Mode 2", "Mode 3"
+    };
+    const struct g300s_mode *m;
+
+    for (int i = 0; i < G300S_MODE_COUNT; i++) {
+        int rc = g300s_load_mode(a->g300s_fd, i, a->g300s_modes[i].raw);
+
+        if (rc != RSLAP_RC_OK)
+            return rc_exit(a, rc, "reading G300s mode block");
+        g300s_decode(a->g300s_modes[i].raw, &a->g300s_modes[i]);
+        m = &a->g300s_modes[i];
+
+        printf("%s%s — LED %s\n", i ? "\n" : "", mode_names[i],
+               g300s_colour_name(m->colour));
+        printf("  report rate: %d Hz%s\n", m->report_rate,
+               m->report_rate ? "" : " (unknown index)");
+        fputs("  DPI levels:", stdout);
+        for (int d = 0; d < G300S_DPI_STAGE_COUNT; d++)
+            printf(" %d%s", m->dpi[d], m->dpi_default == d + 1 ? "*" : "");
+        fputs("   (* default)\n", stdout);
+        if (m->dpi_shift)
+            printf("  DPI shift: %d\n", m->dpi_shift);
+        else
+            printf("  DPI shift: disabled\n");
+        for (int b = 0; b < G300S_BUTTON_COUNT; b++) {
+            char out[96];
+
+            print_g300s_binding(out, sizeof(out), &m->buttons[b]);
+            printf("  G%d=%-18s", b + 1, out);
+            if (b % 3 == 2)
+                putchar('\n');
+        }
+    }
+    return 0;
+}
+
 static int cmd_info(struct app *a)
 {
+    if (a->family == FAM_G300S)
+        return g300s_info(a);
+    {
     int pct, hz, x, y;
     uint8_t lod;
     const char *status;
@@ -486,6 +624,7 @@ static int cmd_info(struct app *a)
         print_profile(&a->ob, &p, slot == active);
     }
     return 0;
+    }
 }
 
 static int cmd_active(struct app *a)
@@ -519,6 +658,26 @@ static int cmd_backup(struct app *a, const char *file)
 
     if (!f)
         die(EX_USAGE, "cannot write %s: %s", file, strerror(errno));
+    if (a->family == FAM_G300S) {
+        fprintf(f, "# ratslap-g305x on-board memory backup v1\n");
+        fprintf(f, "device %s\n", a->name);
+        fprintf(f, "vid_pid 046d:%04x\n", a->cand.pid);
+        fprintf(f, "block_len %d\n", G300S_BLOCK_LEN);
+        for (int i = 0; i < G300S_MODE_COUNT; i++) {
+            uint8_t mraw[G300S_BLOCK_LEN];
+
+            if (g300s_load_mode(a->g300s_fd, i, mraw) != RSLAP_RC_OK)
+                continue;
+            fprintf(f, "mode 0x%02x ", 0xf3 + i);
+            for (int j = 0; j < G300S_BLOCK_LEN; j++)
+                fprintf(f, "%02x", mraw[j]);
+            fputc('\n', f);
+            saved++;
+        }
+        fclose(f);
+        printf("saved %d mode blocks to %s\n", saved, file);
+        return 0;
+    }
     unit_hex(a->unit, key, sizeof(key));
     fprintf(f, "# ratslap-g305x on-board memory backup v1\n");
     fprintf(f, "device %s\n", a->name);
@@ -942,6 +1101,16 @@ int main(int argc, char **argv)
     }
 
     open_app(&a, match);
+
+    /* the G300s read-only slice: everything except listing, info and
+     * backup waits for the write slice (editor sequence + SET_REPORT) */
+    if (a.family == FAM_G300S) {
+        if (cmd[0] == '\0' || (strcmp(cmd, "info") != 0 &&
+                                strcmp(cmd, "backup") != 0))
+            die(EX_USAGE, "'%s' is not available for the G300s yet "
+                "(write support arrives with the write slice)",
+                cmd[0] ? cmd : "(active profile)");
+    }
 
     if (cmd[0] == '\0')
         return cmd_active(&a);

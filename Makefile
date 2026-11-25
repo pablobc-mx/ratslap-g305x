@@ -14,11 +14,11 @@ DEFS      = -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE
 ALL_CFLAGS = $(WARN) $(DEFS) $(CFLAGS)
 
 BIN      = ratslap-g305x
-HDRS     = util.h hidpp.h onboard.h actions.h
-LIB_SRC  = hidpp.c onboard.c actions.c
+HDRS     = util.h hidpp.h onboard.h actions.h g300s.h
+LIB_SRC  = hidpp.c onboard.c actions.c g300s.c
 OBJ      = $(LIB_SRC:.c=.o) main.o
 
-TEST_BINS = test_crc test_hidpp test_profile test_actions
+TEST_BINS = test_crc test_hidpp test_profile test_actions test_g300s
 MOCK_SO   = mock_hidraw.so
 
 all: $(BIN)
