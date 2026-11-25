@@ -150,6 +150,35 @@ static int has_hidpp_reports(const char *node, const char *sysfs)
     return 0;
 }
 
+/* The G300s config interface: report id 0xF3 declared as a Feature
+ * (85 F3 ... b1 xx within a few items). The mouse-input sibling node
+ * answers the same GET with all zeros (owner-confirmed), so the
+ * descriptor is the only safe node selector. */
+static int has_g300s_reports(const char *node, const char *sysfs)
+{
+    char path[512];
+    uint8_t desc[4096];
+    ssize_t n, i, j;
+    int fd;
+
+    snprintf(path, sizeof(path), "%.200s/%.50s/device/report_descriptor", sysfs, node);
+    fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return 0;
+    n = read(fd, desc, sizeof(desc));
+    close(fd);
+    if (n < 8)
+        return 0;
+    for (i = 0; i + 1 < n; i++) {
+        if (desc[i] != 0x85 || desc[i + 1] != 0xF3)
+            continue;
+        for (j = i + 2; j < n && j < i + 12; j++)
+            if (desc[j] == 0xb1 && j + 1 < n && desc[j + 1] <= 0x03)
+                return 1;
+    }
+    return 0;
+}
+
 static int is_receiver(int bus, uint16_t pid)
 {
     /* Unifying, LIGHTSPEED and Bolt receivers all live in 046D:C5xx */
@@ -216,12 +245,14 @@ int hidpp_scan(struct hidpp_candidate *out, int max)
                 c.pid = (uint16_t)pid;
             }
         }
-        /* keep HID++ endpoints plus the G300s vendor-config nodes:
-         * the G300s has no HID++ reports, so it would be dropped
-         * here; the actual node selection happens later, when
-         * g300s_check() asks the feature reports directly */
-        if (c.vid != RSLAP_VID_LOGITECH ||
-            (!has_hidpp_reports(de->d_name, sysfs) && c.pid != G300S_PID))
+        /* keep HID++ endpoints plus the G300s config interface:
+         * the plain-mouse node of a G300s answers mode GETs with
+         * zeros (owner-confirmed), so only the node whose descriptor
+         * declares the 0xF3 feature report passes */
+        if (c.vid != RSLAP_VID_LOGITECH)
+            continue;
+        if (!has_hidpp_reports(de->d_name, sysfs) &&
+            !(c.pid == G300S_PID && has_g300s_reports(de->d_name, sysfs)))
             continue;
 
         snprintf(c.path, sizeof(c.path), "%.200s/%.40s", devpfx, de->d_name);
