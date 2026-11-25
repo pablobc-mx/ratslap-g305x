@@ -2,6 +2,7 @@
  * (test_hidpp.c drove their implementation). */
 #include "hidpp.h"
 #include "onboard.h" /* report-rate table for live-rate display */
+#include "g300s.h"   /* G300S_PID: vendor-config nodes have no HID++ */
 #include <string.h>
 
 static const char *const hidpp_errors[] = {
@@ -215,7 +216,12 @@ int hidpp_scan(struct hidpp_candidate *out, int max)
                 c.pid = (uint16_t)pid;
             }
         }
-        if (c.vid != RSLAP_VID_LOGITECH || !has_hidpp_reports(de->d_name, sysfs))
+        /* keep HID++ endpoints plus the G300s vendor-config nodes:
+         * the G300s has no HID++ reports, so it would be dropped
+         * here; the actual node selection happens later, when
+         * g300s_check() asks the feature reports directly */
+        if (c.vid != RSLAP_VID_LOGITECH ||
+            (!has_hidpp_reports(de->d_name, sysfs) && c.pid != G300S_PID))
             continue;
 
         snprintf(c.path, sizeof(c.path), "%.200s/%.40s", devpfx, de->d_name);
