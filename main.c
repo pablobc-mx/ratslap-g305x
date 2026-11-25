@@ -525,6 +525,8 @@ static int g300s_info(struct app *a)
     };
     const struct g300s_mode *m;
 
+    if (g300s_begin_session(a->g300s_fd) != RSLAP_RC_OK)
+        die(EX_DEVICE, "opening the G300s editor session");
     for (int i = 0; i < G300S_MODE_COUNT; i++) {
         int rc = g300s_load_mode(a->g300s_fd, i, a->g300s_modes[i].raw);
 
@@ -659,6 +661,8 @@ static int cmd_backup(struct app *a, const char *file)
     if (!f)
         die(EX_USAGE, "cannot write %s: %s", file, strerror(errno));
     if (a->family == FAM_G300S) {
+        if (g300s_begin_session(a->g300s_fd) != RSLAP_RC_OK)
+            die(EX_DEVICE, "opening the G300s editor session");
         fprintf(f, "# ratslap-g305x on-board memory backup v1\n");
         fprintf(f, "device %s\n", a->name);
         fprintf(f, "vid_pid 046d:%04x\n", a->cand.pid);

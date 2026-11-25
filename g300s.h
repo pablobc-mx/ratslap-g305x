@@ -1,9 +1,11 @@
 /* ratslap-g305x — Logitech G300/G300s (046d:c246) support.
  *
  * The G300s predates HID++: it is configured through vendor feature
- * reports (IDs 0xF0-0xF5) on its second USB interface. Reading needs no
- * session handshake: each of the three modes lives in its own feature
- * report (0xF3/F4/F5, 35 bytes including the report-id prefix).
+ * reports (IDs 0xF0-0xF5) on its second USB interface. Mode reads only
+ * answer inside the device's editor session: krayon/ratslap (GPL-2)
+ * runs the 0xF0 sequence before every mode_load, and the LGS sniff
+ * shows the same. Without it the interface returns 35 zero bytes
+ * (owner-confirmed on a mouse with configured profiles).
  * Protocol per krayon/ratslap (GPL-2) observations, re-implemented
  * here; names and layouts below are device facts, not copied code.
  * SPDX-License-Identifier: GPL-3.0-or-later */
@@ -52,6 +54,14 @@ int g300s_check(int fd);
 /* Read one mode (0..2 -> report 0xF3..0xF5) into raw. The report id
  * must be echoed as raw[0]; anything else is RSLAP_RC_MALFORMED. */
 int g300s_load_mode(int fd, int mode, uint8_t raw[G300S_BLOCK_LEN]);
+
+/* Open the device's editor session. The G300s firmware answers mode
+ * GETs with zero bytes outside this state, so every read or write
+ * session must begin here. Commands and pauses mirror the reference
+ * flow (launch editor, commit, leave, the firmware's reset-ish 0xF1,
+ * start-edit). The LED may dim for the session's duration — that is
+ * the device's normal config-mode behaviour. */
+int g300s_begin_session(int fd);
 
 /* Decode a 35-byte block. Never fails; unknown table indices decode
  * to 0/NULL-name placeholders so info stays printable. */

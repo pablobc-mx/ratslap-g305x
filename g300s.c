@@ -125,6 +125,31 @@ int g300s_load_mode(int fd, int mode, uint8_t raw[G300S_BLOCK_LEN])
     return RSLAP_RC_OK;
 }
 
+/* The exact command flow the reference tool runs before every mode
+ * read: launch editor, commit, leave, the firmware's reset-ish 0xF1,
+ * then start-edit, with the original's pauses. All sizes match the
+ * report descriptor (F0: id+3, F1/F2: id+1). */
+int g300s_begin_session(int fd)
+{
+    uint8_t steps[5][4] = {
+        { 0xf0, 0x42, 0x39, 0x00 },  /* launch editor */
+        { 0xf2, 0x4f, 0x00, 0x00 },  /* commit */
+        { 0xf0, 0x00, 0x00, 0x00 },  /* leave */
+        { 0xf1, 0x00, 0x00, 0x00 },  /* firmware reset-ish */
+        { 0xf0, 0x42, 0x00, 0x00 },  /* start edit */
+    };
+    static const int lens[5] = { 4, 2, 4, 2, 4 };
+    int i;
+
+    for (i = 0; i < 5; i++) {
+        if (ioctl(fd, HIDIOCSFEATURE(lens[i]), steps[i]) != lens[i])
+            return RSLAP_RC_HIDPP;
+        usleep(50000);
+    }
+    usleep(500000); /* the firmware settles, per the reference flow */
+    return RSLAP_RC_OK;
+}
+
 void g300s_decode(const uint8_t raw[G300S_BLOCK_LEN], struct g300s_mode *m)
 {
     int i;
