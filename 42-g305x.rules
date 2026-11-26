@@ -26,3 +26,10 @@
 
 KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", TAG+="uaccess"
 KERNEL=="hidraw*", SUBSYSTEM=="hidraw", KERNELS=="*:046D:*", TAG+="uaccess"
+
+# The G300/G300s (046d:c246) is not an HID++ device: its profiles are
+# vendor feature reports on USB interface 1, and the firmware answers
+# them with zero data while the kernel HID driver polls that interface.
+# ratslap-g305x therefore claims the interface through usbfs, which
+# needs raw access to the USB device node:
+SUBSYSTEM=="usb", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c246", TAG+="uaccess"

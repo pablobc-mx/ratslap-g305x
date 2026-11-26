@@ -224,6 +224,34 @@ Environment overrides (also handy for debugging on real systems):
 (default `/dev`) redirect the scan; `RSLAP_STATE_DIR` redirects the
 backup registry.
 
+## Logitech G300/G300s (046d:c246) — read-only
+
+The original namesake device is supported for reading: `list`, `info`
+and `backup` work with a G300/G300s plugged in, alongside any G305 X
+(`-d g300` picks it when both are present).
+
+The G300s predates HID++ and speaks a completely different protocol:
+its three profiles ("modes") live in vendor feature reports 0xF3–0xF5
+(35 bytes) on the mouse's second USB interface. Two properties make
+it unusual, both confirmed on real hardware:
+
+- **The firmware only serves mode data while nothing polls that
+  interface.** With the kernel HID driver bound, every mode read
+  returns 35 zero bytes; the tool therefore claims the interface via
+  usbfs (`USBDEVFS_DISCONNECT_CLAIM`) for the duration of a command
+  and rebinds the driver afterwards. Mouse input never stops working,
+  and the interface's hidraw node returns as soon as the tool exits.
+- **Mode reads need no session handshake** — the 0xF0 editor sequence
+  from the original tool is write-path plumbing only (reads are
+  byte-identical with and without it).
+
+This needs one extra udev line (already included in `42-g305x.rules`):
+raw usbfs access to the device node. Writes (`button`, `dpi`, `rate`,
+`restore`) arrive with the G300s write slice and are refused for now.
+
+Protocol facts re-derived from krayon/ratslap (GPL-2; no code copied —
+see Credits).
+
 ## Credits & license
 
 - CLI/UX model: [`krayon/ratslap`](https://github.com/krayon/ratslap)

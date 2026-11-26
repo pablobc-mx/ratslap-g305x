@@ -40,28 +40,44 @@ struct g300s_mode {
     struct g300s_binding buttons[G300S_BUTTON_COUNT];
 };
 
-/* Open a G300s config node (O_RDWR). Returns the fd or -1 with errno
- * set (EACCES = uaccess/rule problem, ENOENT = node vanished). */
-int g300s_open(const char *node);
+/* ---- transport: raw usbfs control transfers ------------------------- */
+/* The kernel's HID stack polling the config interface makes the G300s
+ * firmware answer mode GETs with zero bytes (owner-confirmed against a
+ * mouse with configured profiles), so hidraw cannot serve this device.
+ * The transport instead claims USB interface 1 through usbfs (usbhid
+ * detached for the session) and speaks the vendor feature reports as
+ * raw control transfers — the reference tool's libusb carrier, without
+ * the 2013 ceremony. The interface's hidraw node is absent while the
+ * claim is held and is restored on close (release + driver rebind). */
+struct g300s_usbdev {
+    int fd;
+    char ifname[64];   /* e.g. "1-4:1.1" — the usbhid rebind name */
+};
 
-/* Check an open fd: asks for mode report 0xF3 and expects the report
- * id echoed. Returns 1 if this node speaks the G300s config protocol,
- * 0 otherwise. Safe on non-G300s nodes: the kernel rejects feature
- * requests that are not in the report descriptor before any device
- * traffic happens. */
-int g300s_check(int fd);
+/* Find the G300s on the USB tree. Fills node_out with the usbfs node
+ * path (/dev/bus/usb/BBB/DDD) and if_out with the interface-1 sysfs
+ * name. RSLAP_USB_SYSFS_PATH overrides /sys/bus/usb/devices. Returns
+ * 1 when a G300s is present. */
+int g300s_scan(char *node_out, size_t node_len, char *if_out, size_t if_len);
 
-/* Read one mode (0..2 -> report 0xF3..0xF5) into raw. The report id
- * must be echoed as raw[0]; anything else is RSLAP_RC_MALFORMED. */
-int g300s_load_mode(int fd, int mode, uint8_t raw[G300S_BLOCK_LEN]);
+/* Open the USB node (O_RDWR) and remember the rebind name. errno stays
+ * set on failure (EACCES = udev rule missing). */
+int g300s_open(struct g300s_usbdev *d, const char *node, const char *ifname);
 
-/* Open the device's editor session. The G300s firmware answers mode
- * GETs with zero bytes outside this state, so every read or write
- * session must begin here. Commands and pauses mirror the reference
- * flow (launch editor, commit, leave, the firmware's reset-ish 0xF1,
- * start-edit). The LED may dim for the session's duration — that is
- * the device's normal config-mode behaviour. */
-int g300s_begin_session(int fd);
+/* Atomically detach usbhid from interface 1 and claim it for this fd
+ * (USBDEVFS_DISCONNECT_CLAIM). Until release, the firmware serves real
+ * mode data. */
+int g300s_claim(struct g300s_usbdev *d);
+
+/* Read one mode (0..2 -> report 0xF3..0xF5) into raw. No session
+ * handshake is needed for reads (owner-confirmed: identical bytes with
+ * and without the 0xF0 editor sequence). The report id must be echoed
+ * as raw[0]. */
+int g300s_load_mode(struct g300s_usbdev *d, int mode,
+                    uint8_t raw[G300S_BLOCK_LEN]);
+
+/* Release the claim, rebind usbhid, close. Restores the hidraw node. */
+void g300s_close(struct g300s_usbdev *d);
 
 /* Decode a 35-byte block. Never fails; unknown table indices decode
  * to 0/NULL-name placeholders so info stays printable. */

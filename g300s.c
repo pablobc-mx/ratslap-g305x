@@ -3,9 +3,14 @@
  * The G300s is not an HID++ device. Its three profiles ("modes") are
  * stored in vendor feature reports 0xF3/0xF4/0xF5 on the second USB
  * interface (HID_PHYS ...input1), 35 bytes each including the report
- * id. Reading is a single HIDIOCGFEATURE; no session handshake is
- * needed (krayon/ratslap's "prime" only opens USB, and the 0xF0
- * editor sequence is required for writes only).
+ * id. Reads need no session handshake (owner-confirmed: identical
+ * bytes with and without the 0xF0 editor sequence) — but they DO need
+ * the interface free of the kernel HID stack: while usbhid polls it,
+ * the firmware answers every mode GET with 35 zero bytes. The
+ * transport therefore claims interface 1 via usbfs and speaks raw
+ * control transfers (the reference tool's libusb carrier, minus the
+ * 2013 detach ceremony, which the kernel now provides atomically via
+ * USBDEVFS_DISCONNECT_CLAIM).
  *
  * Wire layout of a mode block, confirmed against krayon's annotated
  * dump "F5 04 03 02 8406 0844 01 00 00 ...":
@@ -21,9 +26,10 @@
 #include "util.h"
 #include "g300s.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <linux/hidraw.h>
+#include <linux/usbdevice_fs.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -92,62 +98,143 @@ static int dpi_point(int n)
     return n ? n * 250 : 4000;
 }
 
-int g300s_open(const char *node)
+/* Read one sysfs id file (idVendor, idProduct, busnum, devnum) into a
+ * short string with trailing whitespace stripped. */
+static int read_id(const char *base, const char *dev, const char *leaf,
+                   char *out, size_t outlen)
 {
-    return open(node, O_RDWR);
-}
+    char path[512];
+    ssize_t n;
+    int fd;
 
-int g300s_check(int fd)
-{
-    uint8_t buf[G300S_BLOCK_LEN];
-
-    memset(buf, 0, sizeof(buf));
-    buf[0] = G300S_RID_F3;
-    if (ioctl(fd, HIDIOCGFEATURE(G300S_BLOCK_LEN), buf) != G300S_BLOCK_LEN)
+    snprintf(path, sizeof(path), "%.200s/%.40s/%s", base, dev, leaf);
+    fd = open(path, O_RDONLY);
+    if (fd < 0)
         return 0;
-    return buf[0] == G300S_RID_F3;
+    n = read(fd, out, outlen - 1);
+    close(fd);
+    if (n <= 0)
+        return 0;
+    out[n] = '\0';
+    while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == ' '))
+        out[--n] = '\0';
+    return 1;
 }
 
-int g300s_load_mode(int fd, int mode, uint8_t raw[G300S_BLOCK_LEN])
+int g300s_scan(char *node_out, size_t node_len, char *if_out, size_t if_len)
+{
+    const char *base = getenv("RSLAP_USB_SYSFS_PATH");
+    struct dirent *de;
+    DIR *dir;
+    int found = 0;
+
+    if (!base)
+        base = "/sys/bus/usb/devices";
+    dir = opendir(base);
+    if (dir == NULL)
+        return 0;
+    while ((de = readdir(dir)) != NULL) {
+        char vid[16], pid[16], bus[16], dev[16];
+
+        if (de->d_name[0] == '.' || strchr(de->d_name, ':'))
+            continue; /* interfaces carry a colon; devices do not */
+        if (!read_id(base, de->d_name, "idVendor", vid, sizeof(vid)) ||
+            strcmp(vid, "046d") != 0)
+            continue;
+        if (!read_id(base, de->d_name, "idProduct", pid, sizeof(pid)) ||
+            strcmp(pid, "c246") != 0)
+            continue;
+        if (read_id(base, de->d_name, "busnum", bus, sizeof(bus)) &&
+            read_id(base, de->d_name, "devnum", dev, sizeof(dev))) {
+            snprintf(node_out, node_len, "/dev/bus/usb/%03d/%03d",
+                     atoi(bus), atoi(dev));
+            snprintf(if_out, if_len, "%.40s:1.1", de->d_name);
+            found = 1;
+            break;
+        }
+    }
+    closedir(dir);
+    return found;
+}
+
+int g300s_open(struct g300s_usbdev *d, const char *node, const char *ifname)
+{
+    memset(d, 0, sizeof(*d));
+    d->fd = open(node, O_RDWR);
+    if (d->fd < 0)
+        return RSLAP_RC_HIDPP;
+    snprintf(d->ifname, sizeof(d->ifname), "%.60s", ifname);
+    return RSLAP_RC_OK;
+}
+
+int g300s_claim(struct g300s_usbdev *d)
+{
+    struct usbdevfs_disconnect_claim dc;
+
+    memset(&dc, 0, sizeof(dc));
+    dc.interface = 1;
+    if (ioctl(d->fd, USBDEVFS_DISCONNECT_CLAIM, &dc) < 0)
+        return RSLAP_RC_HIDPP;
+    return RSLAP_RC_OK;
+}
+
+/* One raw USB control transfer (class requests to interface 1). */
+static int usb_ctrl(struct g300s_usbdev *d, uint8_t bm, uint8_t req,
+                    uint16_t wval, uint16_t widx, uint8_t *data, uint16_t len)
+{
+    struct usbdevfs_ctrltransfer tr;
+    int rc;
+
+    memset(&tr, 0, sizeof(tr));
+    tr.bRequestType = bm;
+    tr.bRequest = req;
+    tr.wValue = wval;
+    tr.wIndex = widx;
+    tr.wLength = len;
+    tr.timeout = 1000; /* ms */
+    tr.data = data;
+    rc = ioctl(d->fd, USBDEVFS_CONTROL, &tr);
+    if (rc < 0)
+        return RSLAP_RC_HIDPP;
+    return rc;
+}
+
+int g300s_load_mode(struct g300s_usbdev *d, int mode,
+                    uint8_t raw[G300S_BLOCK_LEN])
 {
     uint8_t rid;
+    int rc;
 
     if (mode < 0 || mode >= G300S_MODE_COUNT)
         return RSLAP_RC_MALFORMED;
 
     rid = (uint8_t)(G300S_RID_F3 + mode);
     memset(raw, 0, G300S_BLOCK_LEN);
-    raw[0] = rid;
-    if (ioctl(fd, HIDIOCGFEATURE(G300S_BLOCK_LEN), raw) != G300S_BLOCK_LEN)
-        return errno ? RSLAP_RC_HIDPP : RSLAP_RC_MALFORMED;
+    rc = usb_ctrl(d, 0xa1, 0x01 /* GET_REPORT */,
+                  (uint16_t)(0x0300 | rid), 1, raw, G300S_BLOCK_LEN);
+    if (rc != G300S_BLOCK_LEN)
+        return RSLAP_RC_MALFORMED;
     if (raw[0] != rid)
         return RSLAP_RC_MALFORMED;
     return RSLAP_RC_OK;
 }
 
-/* The exact command flow the reference tool runs before every mode
- * read: launch editor, commit, leave, the firmware's reset-ish 0xF1,
- * then start-edit, with the original's pauses. All sizes match the
- * report descriptor (F0: id+3, F1/F2: id+1). */
-int g300s_begin_session(int fd)
+void g300s_close(struct g300s_usbdev *d)
 {
-    uint8_t steps[5][4] = {
-        { 0xf0, 0x42, 0x39, 0x00 },  /* launch editor */
-        { 0xf2, 0x4f, 0x00, 0x00 },  /* commit */
-        { 0xf0, 0x00, 0x00, 0x00 },  /* leave */
-        { 0xf1, 0x00, 0x00, 0x00 },  /* firmware reset-ish */
-        { 0xf0, 0x42, 0x00, 0x00 },  /* start edit */
-    };
-    static const int lens[5] = { 4, 2, 4, 2, 4 };
-    int i;
+    unsigned int ifno = 1;
+    FILE *f;
 
-    for (i = 0; i < 5; i++) {
-        if (ioctl(fd, HIDIOCSFEATURE(lens[i]), steps[i]) != lens[i])
-            return RSLAP_RC_HIDPP;
-        usleep(50000);
+    if (d->fd >= 0) {
+        ioctl(d->fd, USBDEVFS_RELEASEINTERFACE, &ifno); /* best effort */
+        close(d->fd);
+        d->fd = -1;
     }
-    usleep(500000); /* the firmware settles, per the reference flow */
-    return RSLAP_RC_OK;
+    /* hand the interface back to usbhid so its hidraw node returns */
+    f = fopen("/sys/bus/usb/drivers/usbhid/bind", "w");
+    if (f) {
+        fprintf(f, "%s", d->ifname);
+        fclose(f);
+    }
 }
 
 void g300s_decode(const uint8_t raw[G300S_BLOCK_LEN], struct g300s_mode *m)

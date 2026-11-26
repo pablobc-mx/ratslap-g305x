@@ -32,7 +32,7 @@ struct app {
     int has_unit;
     uint16_t models[3];
     enum app_family family;
-    int g300s_fd;
+    struct g300s_usbdev g300s;
     struct g300s_mode g300s_modes[G300S_MODE_COUNT];
 };
 
@@ -228,40 +228,62 @@ nope:
     return -1;
 }
 
-/* Open a G300s config node. Of the mouse's two hidraw nodes only the
- * second interface (HID_PHYS ...input1) answers the mode feature
- * reports, so g300s_check() doubles as the node selector. */
-static int try_open_g300s(struct app *a, const struct hidpp_candidate *c)
+/* Find and open the G300s: a USB device claimed through usbfs, not an
+ * HID++ hidraw node. Of the mouse's interfaces only the config one
+ * (number 1) answers the mode reports, and only while it is held by
+ * this process — the kernel HID stack polling it makes the firmware
+ * return zero blocks. g300s_close() restores the kernel driver. */
+static int try_open_g300s(struct app *a)
 {
-    int fd;
+    char node[64], ifname[64];
+    uint8_t raw[G300S_BLOCK_LEN];
 
-    if (c->vid != G300S_VID || c->pid != G300S_PID)
+    if (!g300s_scan(node, sizeof(node), ifname, sizeof(ifname)))
         return -1;
-    fd = g300s_open(c->path);
-    if (fd < 0)
+    if (g300s_open(&a->g300s, node, ifname) != RSLAP_RC_OK)
         return errno == EACCES ? -2 : -1;
-    if (!g300s_check(fd)) {
-        close(fd);
+    if (g300s_claim(&a->g300s) != RSLAP_RC_OK) {
+        close(a->g300s.fd);
+        return -1;
+    }
+    if (g300s_load_mode(&a->g300s, 0, raw) != RSLAP_RC_OK) {
+        g300s_close(&a->g300s);
         return -1;
     }
     a->family = FAM_G300S;
-    a->g300s_fd = fd;
-    a->cand = *c;
-    snprintf(a->name, sizeof(a->name), "%s", c->name);
+    snprintf(a->name, sizeof(a->name), "Logitech G300s Optical Gaming Mouse");
+    snprintf(a->cand.path, sizeof(a->cand.path), "%s", node);
+    snprintf(a->cand.link, sizeof(a->cand.link), "USB");
+    a->cand.vid = G300S_VID;
+    a->cand.pid = G300S_PID;
     return 0;
 }
 
 static void close_found(struct app *a)
 {
-    if (a->family == FAM_G300S) {
-        close(a->g300s_fd);
-        a->g300s_fd = -1;
-    } else {
+    if (a->family == FAM_G300S)
+        g300s_close(&a->g300s);
+    else
         hidpp_close(&a->dev);
-    }
 }
 
-/* returns 0 with a->dev usable, or exits */
+/* does the lowercased "name pid" contain the lowercased match? */
+static int name_matches(const char *name, uint16_t pid, const char *match)
+{
+    char key[256], m[64];
+
+    if (!match)
+        return 1;
+    snprintf(key, sizeof(key), "%s %04x", name, pid);
+    for (size_t x = 0; key[x]; x++)
+        key[x] = (char)tolower((unsigned char)key[x]);
+    snprintf(m, sizeof(m), "%s", match);
+    for (size_t x = 0; m[x]; x++)
+        m[x] = (char)tolower((unsigned char)m[x]);
+    return strstr(key, m) != NULL;
+}
+
+/* returns 0 with the found device usable, or exits */
 static void discover(struct app *a, const char *match)
 {
     struct hidpp_candidate cands[64];
@@ -275,33 +297,28 @@ static void discover(struct app *a, const char *match)
             saw_deny = 1;
             continue;
         }
-        if (rc != 0) {
-            /* not an HID++ endpoint; a G300s answers here instead */
-            rc = try_open_g300s(a, &cands[i]);
-            if (rc == -2) {
-                saw_deny = 1;
-                continue;
-            }
-            if (rc != 0)
-                continue;
-        }
+        if (rc != 0)
+            continue;
         saw_dev = 1;
-        if (match) {
-            char key[256], m[64];
-            uint16_t pid = a->family == FAM_G300S ? a->cand.pid : a->dev.pid;
-
-            snprintf(key, sizeof(key), "%s %04x", a->name, pid);
-            for (size_t x = 0; key[x]; x++)
-                key[x] = (char)tolower((unsigned char)key[x]);
-            snprintf(m, sizeof(m), "%s", match);
-            for (size_t x = 0; m[x]; x++)
-                m[x] = (char)tolower((unsigned char)m[x]);
-            if (!strstr(key, m)) {
-                close_found(a);
-                continue;
-            }
+        if (!name_matches(a->name, a->dev.pid, match)) {
+            close_found(a);
+            continue;
         }
         return; /* this one */
+    }
+
+    /* the G300s is not an HID++ device: it is claimed through usbfs */
+    {
+        int rc = try_open_g300s(a);
+
+        if (rc == 0) {
+            saw_dev = 1;
+            if (name_matches(a->name, a->cand.pid, match))
+                return;
+            close_found(a);
+        } else if (rc == -2) {
+            saw_deny = 1;
+        }
     }
     if (saw_deny)
         die(EX_NO_DEVICE,
@@ -433,25 +450,11 @@ static int cmd_list(const char *match)
 
         memset(&a, 0, sizeof(a));
         rc = try_open(&a, &cands[i]);
-        if (rc != 0) {
-            rc = try_open_g300s(&a, &cands[i]);
-            if (rc != 0)
-                continue;
-        }
-        if (match) {
-            char key[256], m[64];
-            uint16_t pid = a.family == FAM_G300S ? a.cand.pid : a.dev.pid;
-
-            snprintf(key, sizeof(key), "%s %04x", a.name, pid);
-            for (size_t x = 0; key[x]; x++)
-                key[x] = (char)tolower((unsigned char)key[x]);
-            snprintf(m, sizeof(m), "%s", match);
-            for (size_t x = 0; m[x]; x++)
-                m[x] = (char)tolower((unsigned char)m[x]);
-            if (!strstr(key, m)) {
-                close_found(&a);
-                continue;
-            }
+        if (rc != 0)
+            continue;
+        if (!name_matches(a.name, a.dev.pid, match)) {
+            close_found(&a);
+            continue;
         }
         /* one line per physical mouse: dedupe receiver-slot endpoints
          * against the device's own node by unit id */
@@ -468,10 +471,23 @@ static int cmd_list(const char *match)
             if (nseen < 8)
                 memcpy(seen_units[nseen++], a.unit, 4);
         }
-        printf("%s  [%s, 046d:%04x, %s]\n", a.name, a.cand.link,
-               a.family == FAM_G300S ? a.cand.pid : a.dev.pid, a.cand.path);
+        printf("%s  [%s, 046d:%04x, %s]\n", a.name, a.cand.link, a.dev.pid, a.cand.path);
         close_found(&a);
         shown++;
+    }
+
+    /* the G300s lives on the usbfs tree, not the hidraw candidates */
+    {
+        struct app b;
+
+        memset(&b, 0, sizeof(b));
+        if (try_open_g300s(&b) == 0 &&
+            name_matches(b.name, b.cand.pid, match)) {
+            printf("%s  [%s, 046d:%04x, %s]\n", b.name, b.cand.link,
+                   b.cand.pid, b.cand.path);
+            close_found(&b);
+            shown++;
+        }
     }
     if (!shown) {
         puts("no compatible device found");
@@ -525,10 +541,8 @@ static int g300s_info(struct app *a)
     };
     const struct g300s_mode *m;
 
-    if (g300s_begin_session(a->g300s_fd) != RSLAP_RC_OK)
-        die(EX_DEVICE, "opening the G300s editor session");
     for (int i = 0; i < G300S_MODE_COUNT; i++) {
-        int rc = g300s_load_mode(a->g300s_fd, i, a->g300s_modes[i].raw);
+        int rc = g300s_load_mode(&a->g300s, i, a->g300s_modes[i].raw);
 
         if (rc != RSLAP_RC_OK)
             return rc_exit(a, rc, "reading G300s mode block");
@@ -661,8 +675,6 @@ static int cmd_backup(struct app *a, const char *file)
     if (!f)
         die(EX_USAGE, "cannot write %s: %s", file, strerror(errno));
     if (a->family == FAM_G300S) {
-        if (g300s_begin_session(a->g300s_fd) != RSLAP_RC_OK)
-            die(EX_DEVICE, "opening the G300s editor session");
         fprintf(f, "# ratslap-g305x on-board memory backup v1\n");
         fprintf(f, "device %s\n", a->name);
         fprintf(f, "vid_pid 046d:%04x\n", a->cand.pid);
@@ -670,7 +682,7 @@ static int cmd_backup(struct app *a, const char *file)
         for (int i = 0; i < G300S_MODE_COUNT; i++) {
             uint8_t mraw[G300S_BLOCK_LEN];
 
-            if (g300s_load_mode(a->g300s_fd, i, mraw) != RSLAP_RC_OK)
+            if (g300s_load_mode(&a->g300s, i, mraw) != RSLAP_RC_OK)
                 continue;
             fprintf(f, "mode 0x%02x ", 0xf3 + i);
             for (int j = 0; j < G300S_BLOCK_LEN; j++)
