@@ -246,6 +246,11 @@ static int try_open_g300s(struct app *a)
         close(a->g300s.fd);
         return -1;
     }
+    /* reference flow: the editor session opens before any mode read */
+    if (g300s_editor_session(&a->g300s) != RSLAP_RC_OK) {
+        g300s_close(&a->g300s);
+        return -1;
+    }
     if (g300s_load_mode(&a->g300s, 0, raw) != RSLAP_RC_OK) {
         g300s_close(&a->g300s);
         return -1;

@@ -219,6 +219,38 @@ int g300s_load_mode(struct g300s_usbdev *d, int mode,
     return RSLAP_RC_OK;
 }
 
+/* krayon's mouse_editmode(), verbatim flow: the five SET_REPORT
+ * commands their tool runs before every mode read, with their pauses.
+ * Probes read real data without it, but the reference never does —
+ * and our tool's reads without it have only ever returned zeros.
+ * Rejoin the reference flow (owner round decides if it is required). */
+int g300s_editor_session(struct g300s_usbdev *d)
+{
+    static const uint8_t cmds[5][4] = {
+        { 0xf0, 0x42, 0x39, 0x00 },  /* launch editor */
+        { 0xf2, 0x4f, 0x00, 0x00 },  /* commit */
+        { 0xf0, 0x00, 0x00, 0x00 },  /* leave */
+        { 0xf1, 0x00, 0x00, 0x00 },  /* firmware reset-ish */
+        { 0xf0, 0x42, 0x00, 0x00 },  /* start edit */
+    };
+    static const int lens[5] = { 4, 2, 4, 2, 4 };
+    int i, rc;
+
+    for (i = 0; i < 5; i++) {
+        uint8_t buf[4];
+
+        memcpy(buf, cmds[i], sizeof(buf));
+        rc = usb_ctrl(d, 0x21, 0x09 /* SET_REPORT */,
+                      (uint16_t)(0x0300 | cmds[i][0]), 1, buf,
+                      (uint16_t)lens[i]);
+        if (rc != lens[i])
+            return RSLAP_RC_HIDPP;
+        usleep(50000);
+    }
+    usleep(500000); /* the firmware settles, per the reference flow */
+    return RSLAP_RC_OK;
+}
+
 void g300s_close(struct g300s_usbdev *d)
 {
     unsigned int ifno = 1;

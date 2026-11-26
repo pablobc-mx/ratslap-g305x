@@ -79,6 +79,10 @@ int g300s_load_mode(struct g300s_usbdev *d, int mode,
 /* Release the claim, rebind usbhid, close. Restores the hidraw node. */
 void g300s_close(struct g300s_usbdev *d);
 
+/* Run the reference editor sequence (see g300s.c). Reads are only
+ * proven reliable from the tool inside this session. */
+int g300s_editor_session(struct g300s_usbdev *d);
+
 /* Decode a 35-byte block. Never fails; unknown table indices decode
  * to 0/NULL-name placeholders so info stays printable. */
 void g300s_decode(const uint8_t raw[G300S_BLOCK_LEN], struct g300s_mode *m);
