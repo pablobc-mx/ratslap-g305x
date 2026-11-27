@@ -18,6 +18,7 @@
 
 #define RSLAP_VERSION "0.1.0"
 #define PROBE_MS 600
+#define G300S_MATCH_NAME "Logitech G300s Optical Gaming Mouse"
 
 enum app_family { FAM_HIDPP, FAM_G300S };
 
@@ -256,7 +257,7 @@ static int try_open_g300s(struct app *a)
         return -1;
     }
     a->family = FAM_G300S;
-    snprintf(a->name, sizeof(a->name), "Logitech G300s Optical Gaming Mouse");
+    snprintf(a->name, sizeof(a->name), "%s", G300S_MATCH_NAME);
     snprintf(a->cand.path, sizeof(a->cand.path), "%s", node);
     snprintf(a->cand.link, sizeof(a->cand.link), "USB");
     a->cand.vid = G300S_VID;
@@ -294,6 +295,21 @@ static void discover(struct app *a, const char *match)
     struct hidpp_candidate cands[64];
     int n = hidpp_scan(cands, 64);
     int saw_dev = 0, saw_deny = 0;
+
+    /* A named G300s gets a pristine session: on real hardware the
+     * mode reads answer with zero data in any process that first
+     * talks to other HID devices (the HID++ scan pings the receiver
+     * and the G305 X before getting here), while processes that only
+     * claim-and-read get the real bytes. So when the caller names
+     * the G300s, open it before the scan touches anything. */
+    if (match && name_matches(G300S_MATCH_NAME, G300S_PID, match)) {
+        int rc = try_open_g300s(a);
+
+        if (rc == 0)
+            return;
+        if (rc == -2)
+            saw_deny = 1;
+    }
 
     for (int i = 0; i < n; i++) {
         int rc = try_open(a, &cands[i]);
@@ -450,6 +466,22 @@ static int cmd_list(const char *match)
     uint8_t seen_units[8][4];
     int nseen = 0;
 
+    /* the G300s lives on the usbfs tree, and needs the same pristine
+     * session as discover(): list it before the HID++ loop pings
+     * the other mice */
+    {
+        struct app b;
+
+        memset(&b, 0, sizeof(b));
+        if (try_open_g300s(&b) == 0 &&
+            name_matches(b.name, b.cand.pid, match)) {
+            printf("%s  [%s, 046d:%04x, %s]\n", b.name, b.cand.link,
+                   b.cand.pid, b.cand.path);
+            close_found(&b);
+            shown++;
+        }
+    }
+
     for (int i = 0; i < n; i++) {
         int rc;
 
@@ -479,20 +511,6 @@ static int cmd_list(const char *match)
         printf("%s  [%s, 046d:%04x, %s]\n", a.name, a.cand.link, a.dev.pid, a.cand.path);
         close_found(&a);
         shown++;
-    }
-
-    /* the G300s lives on the usbfs tree, not the hidraw candidates */
-    {
-        struct app b;
-
-        memset(&b, 0, sizeof(b));
-        if (try_open_g300s(&b) == 0 &&
-            name_matches(b.name, b.cand.pid, match)) {
-            printf("%s  [%s, 046d:%04x, %s]\n", b.name, b.cand.link,
-                   b.cand.pid, b.cand.path);
-            close_found(&b);
-            shown++;
-        }
     }
     if (!shown) {
         puts("no compatible device found");
@@ -1133,32 +1151,39 @@ int main(int argc, char **argv)
                 cmd[0] ? cmd : "(active profile)");
     }
 
-    if (cmd[0] == '\0')
-        return cmd_active(&a);
-    if (strcmp(cmd, "info") == 0)
-        return cmd_info(&a);
-    if (strcmp(cmd, "backup") == 0) {
-        if (nargs != 1)
-            die(EX_USAGE, "usage: backup FILE");
-        return cmd_backup(&a, args[0]);
+    {
+        int rc = 0;
+
+        if (cmd[0] == '\0')
+            rc = cmd_active(&a);
+        else if (strcmp(cmd, "info") == 0)
+            rc = cmd_info(&a);
+        else if (strcmp(cmd, "backup") == 0) {
+            if (nargs != 1)
+                die(EX_USAGE, "usage: backup FILE");
+            rc = cmd_backup(&a, args[0]);
+        } else if (strcmp(cmd, "restore") == 0) {
+            if (nargs != 1)
+                die(EX_USAGE, "usage: restore FILE");
+            rc = cmd_restore(&a, args[0], force);
+        } else if (strcmp(cmd, "button") == 0)
+            rc = cmd_button(&a, nargs, args, force, 0);
+        else if (strcmp(cmd, "gbutton") == 0)
+            rc = cmd_button(&a, nargs, args, force, 1);
+        else if (strcmp(cmd, "dpi") == 0)
+            rc = cmd_dpi(&a, nargs, args, force);
+        else if (strcmp(cmd, "rate") == 0)
+            rc = cmd_rate(&a, nargs, args, force);
+        else if (strcmp(cmd, "activate") == 0)
+            rc = cmd_activate(&a, nargs, args);
+        else if (strcmp(cmd, "reset") == 0)
+            rc = cmd_reset(&a, nargs, args, force);
+
+        /* release the claimed interface and rebind the kernel driver;
+         * without this the G300s config interface stays driverless */
+        close_found(&a);
+        return rc;
     }
-    if (strcmp(cmd, "restore") == 0) {
-        if (nargs != 1)
-            die(EX_USAGE, "usage: restore FILE");
-        return cmd_restore(&a, args[0], force);
-    }
-    if (strcmp(cmd, "button") == 0)
-        return cmd_button(&a, nargs, args, force, 0);
-    if (strcmp(cmd, "gbutton") == 0)
-        return cmd_button(&a, nargs, args, force, 1);
-    if (strcmp(cmd, "dpi") == 0)
-        return cmd_dpi(&a, nargs, args, force);
-    if (strcmp(cmd, "rate") == 0)
-        return cmd_rate(&a, nargs, args, force);
-    if (strcmp(cmd, "activate") == 0)
-        return cmd_activate(&a, nargs, args);
-    if (strcmp(cmd, "reset") == 0)
-        return cmd_reset(&a, nargs, args, force);
 
     fprintf(stderr, "unknown command '%s'\n\n", cmd); /* unreachable: validated above */
     usage(stderr);
