@@ -224,33 +224,39 @@ Environment overrides (also handy for debugging on real systems):
 (default `/dev`) redirect the scan; `RSLAP_STATE_DIR` redirects the
 backup registry.
 
-## Logitech G300/G300s (046d:c246) — read-only
+## Logitech G300/G300s (046d:c246) — experimental, parked
 
-The original namesake device is supported for reading: `list`, `info`
-and `backup` work with a G300/G300s plugged in, alongside any G305 X
-(`-d g300` picks it when both are present).
+**Status: parked.** The decode layer is validated (the mode-block
+layout is proven against real probe data), and the transport
+primitives all succeed — but the tool's mode reads return
+well-formed zero blocks on real hardware, while byte-identical
+raw-usbfs probes read the real profiles. The difference survived
+every userspace A/B (carrier, privilege, driver state, editor
+session, process purity, strace-level request comparison) and was
+never isolated. The original LGS session never reads modes back at
+all (the vendor capture is writes-only), so the read path is
+auxiliary firmware behaviour whose quirks on 2026 kernels remain
+unmapped. Do not merge this branch expecting working G300s reads;
+the G305 X functionality on `main` is unaffected.
 
-The G300s predates HID++ and speaks a completely different protocol:
-its three profiles ("modes") live in vendor feature reports 0xF3–0xF5
-(35 bytes) on the mouse's second USB interface. Two properties make
-it unusual, both confirmed on real hardware:
+What is known, for whoever picks this up:
 
-- **The firmware only serves mode data while nothing polls that
-  interface.** With the kernel HID driver bound, every mode read
-  returns 35 zero bytes; the tool therefore claims the interface via
-  usbfs (`USBDEVFS_DISCONNECT_CLAIM`) for the duration of a command
-  and rebinds the driver afterwards. Mouse input never stops working,
-  and the interface's hidraw node returns as soon as the tool exits.
-- **Mode reads need no session handshake** — the 0xF0 editor sequence
-  from the original tool is write-path plumbing only (reads are
-  byte-identical with and without it).
+- The G300s predates HID++: three modes live in vendor feature
+  reports 0xF3–0xF5 (35 bytes) on USB interface 1; the wire layout
+  (colour, rate index, DPI nibbles, shift, 9 bindings) matches
+  krayon/ratslap's documented table and their annotated example.
+- Reads need the interface claimed via usbfs
+  (`USBDEVFS_DISCONNECT_CLAIM`); through hidraw the firmware always
+  returns zero blocks.
+- Claim-and-read python probes get the real bytes; the C tool does
+  not, with semantics verified identical by strace. The remaining
+  difference is at the wire level and was never captured.
+- Writes (LGS's actual flow: launch editor, reboot-ish, start edit,
+  SET_REPORT mode block, finish) were never attempted here and are
+  the more promising path — the vendor never needed reads.
 
-This needs one extra udev line (already included in `42-g305x.rules`):
-raw usbfs access to the device node. Writes (`button`, `dpi`, `rate`,
-`restore`) arrive with the G300s write slice and are refused for now.
-
-Protocol facts re-derived from krayon/ratslap (GPL-2; no code copied —
-see Credits).
+Protocol facts re-derived from krayon/ratslap (GPL-2; no code
+copied — see Credits).
 
 ## Credits & license
 
